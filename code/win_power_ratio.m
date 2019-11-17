@@ -34,24 +34,8 @@ I.rampdur = 0.03125; % duration of
 % can optionally plot result
 I.plot = false;
 
-% directory used for memoization
-I.mem_directory = '';
-
 % overwrite default parameters with those specified
 [I,C] = parse_optInputs_keyvalue(varargin, I);
-
-if ~isempty(I.mem_directory)
-    celldata = {segdur_sec, distr, intper_sec, delay_sec};
-    f = setdiff(fieldnames(I), {'plot', 'mem_directory'});
-    for i = 1:length(f)
-        celldata = [celldata, {I.(f{i})}];
-    end
-    mem_file = [I.mem_directory '/' DataHash(celldata) '.mat'];
-    if exist(mem_file, 'file')
-        load(mem_file, 'h_relpower', 't_sec', 'h');
-        return;
-    end
-end
 
 %%  compute window
 
@@ -95,13 +79,6 @@ else
     xi = t_sec<t(1) | t_sec>t(end);
     h_relpower(xi) = 0;
     h(xi) = 0;
-end
-
-
-%% save
-
-if ~isempty(I.mem_directory)
-    save(mkpdir(mem_file), 'h_relpower', 't_sec', 'h');
 end
 
 %% Plot
