@@ -419,10 +419,12 @@ if I.plot_figure
             imagesc(-X, bounds);
             colormap(parula(128));
             colorbar;
-            ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
-            set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
-            xticks = get(gca, 'XTick');
-            set(gca, 'XTickLabel', 1000*M.delay_sec(xticks));
+            yticks = round(get(gca, 'YTick'));
+            set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
+            % ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
+            % set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
+            xticks = round(get(gca, 'XTick'));
+            set(gca, 'XTick', xticks, 'XTickLabel', 1000*M.delay_sec(xticks));
             xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
             title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q)*1000, M.best_delay_sec(q)*1000));
             set(gca, 'FontSize', 12);
