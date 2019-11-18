@@ -1,4 +1,4 @@
-function [h_relpower, t_sec, h] = win_power_ratio(...
+function [h_relpower, t_sec, h, causal] = win_power_ratio(...
     segdur_sec, distr, intper_sec, delay_sec, varargin)
 
 % Calculates the expected correlation for TCI correlation analyses by
@@ -25,6 +25,7 @@ I.target_sr = 1000;
 I.shape = 1;
 I.delaypoint = 'peak';
 I.forcecausal = false;
+I.centralinterval = 0.75;
 
 % window applied to beginning / end of segment
 % see winoverlap.m
@@ -44,9 +45,10 @@ internal_sr = ceil(segdur_sec * I.target_sr) / segdur_sec;
 segdur_smps = checkint(segdur_sec * internal_sr);
 
 % create the window
-[h, t] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, ...
+[h, t, causal] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, ...
      'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
-     'plot', false,'internal_sr', internal_sr, 'rampwin', I.rampwin, 'rampdur', I.rampdur);
+     'plot', false,'internal_sr', internal_sr, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+     'centralinterval', I.centralinterval);
 h(h<0) = 0;
 
 % create delayed copies
@@ -90,7 +92,9 @@ if I.plot
     xlim(t_sec([1,end]));
     legend(h, {'Orig', 'Rel Power'}, 'Location', 'Best');
     subplot(2,1,2);
-    h = plot(t, h_delayed, 'LineWidth', 2);
+    plot(t, h_delayed, 'LineWidth', 2);
+    hold on;
+    plot(t, sum(h_delayed,2), 'k--', 'LineWidth', 2);
     xlim(t([1,end]));
     title('All win');
 end

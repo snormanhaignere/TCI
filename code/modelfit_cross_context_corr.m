@@ -8,6 +8,12 @@ function [M, MAT_file] = modelfit_cross_context_corr(L, varargin)
 
 clear I;
 
+% loss function, options are:
+% sqerr: squared error
+% nse: normalized squared error
+% corr: negative Pearson correlation
+I.lossfn = 'sqerr';
+
 % distribution used to model the window
 % 'gamma' or 'gauss'
 I.distr = 'gamma';
@@ -15,6 +21,9 @@ I.distr = 'gamma';
 % shape parameter for parametric window, not relevant for gaussian
 % 1 -> exponential, higher -> more gaussian
 I.shape = 1;
+
+% central interval used to calculate integration period
+I.centralinterval = 0.75;
 
 % range of integration periods to consider in seconds
 I.intper_range = L.unique_segs([1 end])/1000; % in seconds
@@ -97,6 +106,9 @@ I.plot_figure = true;
 % window used for plotting
 I.plot_win = L.lag_t([1 end]); % in seconds
 
+% quantile of error map to plot
+I.ploterrquant = 0.1;
+
 % whether to run the analysis
 % if false, just returns the parameters to be used
 I.run = true;
@@ -123,7 +135,7 @@ end
 always_include = {'distr'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', ...
-    'plotcausal', 'overwrite'};
+    'plotcausal', 'overwrite', 'ploterrquant'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
@@ -166,6 +178,18 @@ switch I.tranweightdenom
         tranweightdenomfn = @(x)x.^2;
     otherwise
         error('No matching tranweightdenom parameter');
+end
+
+% function used to evaluate lossfn
+switch I.lossfn
+    case 'sqerr'
+        lossfn = @(x,y,w)weighted_squared_error(x,y,w);
+    case 'nse'
+        lossfn = @(x,y,w)weighted_nse(x,y,w);
+    case 'corr'
+        lossfn = @(x,y,w)(-weighted_pearson_corr(x,y,w));
+    otherwise
+        error('No matching loss for %s', I.lossfn);
 end
 
 %% Model fit
@@ -212,7 +236,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.intper_sec = logspace(log10(I.intper_range(1)), log10(I.intper_range(2)), I.nintper);
     M.delay_sec = I.delay_range(1):I.delay_interval:I.delay_range(2);
     M.shape = I.shape;
-    M.err = nan(length(M.intper_sec), length(M.delay_sec), length(M.shape), n_channels);
+    M.loss = nan(length(M.intper_sec), length(M.delay_sec), length(M.shape), n_channels);
     % M.Yh = nan([n_lags, n_seg, length(M.intper_sec), length(M.delay_sec), length(M.shape), n_channels]);
     M.causal_win = false(length(M.intper_sec), length(M.delay_sec), length(M.shape));
     for m = 1:length(M.shape)
@@ -226,10 +250,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 % calculate predictions for each segment
                 for k = valid_seg_durs
                     
-                    [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, ...
+                    [winpow, ~, overlap, M.causal_win(i,j,m)] = win_power_ratio(L.unique_segs(k)/1000, ...
                         I.distr, M.intper_sec(i), M.delay_sec(j), ...
                         'shape', M.shape(m), 'forcecausal', I.forcecausal, ...
-                        'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur);
+                        'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                        'centralinterval', I.centralinterval);
                     if I.winpowratio
                         predictor_notrans = winpow;
                     else
@@ -250,7 +275,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 
                 % calculate error
                 for q = 1:n_channels
-                    E = (Yh(:,valid_seg_durs,q) - M.Y(:,valid_seg_durs,q)).^2;
+                    %E = (Yh(:,valid_seg_durs,q) - M.Y(:,valid_seg_durs,q)).^2;
                     if I.weightdenom
                         w_denom = denom_factor(:,valid_seg_durs,q);
                         w_denom(~(w_denom>I.mindenom)) = 0;
@@ -259,10 +284,12 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     else
                         w_total = w_segs(valid_seg_durs);
                     end
-                    w_total = w_total / sum(w_total(:));
-                    Ew = bsxfun(@times, E, w_total);
+                    % w_total = w_total / sum(w_total(:));
+                    X1 = Yh(:,valid_seg_durs,q);
+                    X2 = M.Y(:,valid_seg_durs,q);
+                    % Ew = bsxfun(@times, E, w_total);
+                    M.loss(i,j,m,q) = lossfn(X1(:), X2(:), w_total(:));
                     clear w_total w_denom;
-                    M.err(i,j,m,q) = nanmean(Ew(:));
                 end
             end
         end
@@ -274,7 +301,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.best_delay_sec = nan(n_channels,1);
     M.best_shape_smp = nan(n_channels,1);
     for q = 1:n_channels
-        X = M.err(:,:,:,q);
+        X = M.loss(:,:,:,q);
         if any(M.causal_win(:)) && I.bestcausal
             X(~M.causal_win) = inf;
         end
@@ -292,7 +319,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
             [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
                 M.best_intper_sec(q), M.best_delay_sec(q), ...
                 'shape', M.best_shape(q), 'forcecausal', I.forcecausal, ...
-                'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur);
+                'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                'centralinterval', I.centralinterval);
             if I.winpowratio
                 predictor_notrans = winpow;
             else
@@ -378,7 +406,7 @@ if I.plot_figure
         print_wrapper([fname '.png']);
         print_wrapper([fname '.pdf']);
         savefig(I.figh, mkpdir([fname '.fig']));
-        
+                
         % plot prediction for best delay, image
         clf(I.figh);
         set(I.figh, 'Position', [100, 100, 900, 600]);
@@ -404,20 +432,26 @@ if I.plot_figure
         % export_fig([fname '.png'], '-png', '-transparent', '-r100');
         
         % plot the error vs. parameters
-        X = M.err(:,:,M.best_shape(q)==M.shape,q);
+        X = M.loss(:,:,M.best_shape(q)==M.shape,q);
         if any(M.causal_win(:)) && I.plotcausal
             causal_string = '_only-causal';
-            X(~M.causal_win(:,:,M.best_shape(q)==M.shape)) = NaN;
+            X(~M.causal_win(:,:,M.best_shape(q)==M.shape)) = inf;
         else
             causal_string = '';
         end
-        bounds = quantile(-X(:), [0.8, 1]);
+        
+        cmap = flipud(cbrewer('seq', 'Reds', 128));
+        [minX,zi] = min(X(:));
+        [xi, ~] = ind2sub(size(X), zi);
+        bounds = [minX, quantile(X(xi,:), I.ploterrquant)];
+        clear xi zi;
+        % bounds = quantile(-X(:), [1-I.ploterrquant, 1]);
         if ~all(isnan(X(:)))
             clf(I.figh);
             set(I.figh, 'Position', [100, 100, 600, 600]);
             
-            imagesc(-X, bounds);
-            colormap(parula(128));
+            imagesc(X, bounds);
+            colormap(cmap);
             colorbar;
             yticks = round(get(gca, 'YTick'));
             set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
@@ -432,7 +466,7 @@ if I.plot_figure
             print_wrapper([fname '.png']);
             savefig(I.figh, mkpdir([fname '.fig']));
             % export_fig([fname '.png'], '-png', '-transparent', '-r100');
-            clear X;
+            % clear X;
         end
     end
     

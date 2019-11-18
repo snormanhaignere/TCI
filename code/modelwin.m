@@ -56,6 +56,9 @@ I.forcecausal = false;
 % start: delay is the first non-zero point
 I.delaypoint = 'peak';
 
+% interval used to calculate integration period
+I.centralinterval = 0.75;
+
 % can optionally return the CDF of the window
 I.cdf = false;
 
@@ -77,6 +80,10 @@ end
 
 %% Window
 
+low_tail = (1-I.centralinterval)/2;
+high_tail = 1-low_tail;
+central_interval = [low_tail, high_tail];
+
 switch distr
     case 'gauss'
         
@@ -85,8 +92,8 @@ switch distr
         end
         
         % gaussian window
-        % sigma when int period = central 95%
-        sig_sec = intper_sec / 3.92;
+        default_intper = norminv(central_interval(2),0,1) - norminv(central_interval(1),0,1);
+        sig_sec = intper_sec / default_intper;
         if I.cdf
             h = normcdf(t_sec - delay_sec, 0, sig_sec);
         else
@@ -109,7 +116,7 @@ switch distr
         b = 1/I.shape;
         
         % ratio which to scale stimulus
-        default_intper = gaminv(0.975,a,b) - gaminv(0.025,a,b);
+        default_intper = gaminv(central_interval(2),a,b) - norminv(central_interval(1),a,b);
         r = intper_sec/default_intper;
         
         % offset to adust delay

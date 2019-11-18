@@ -1,4 +1,4 @@
-function [overlap,t_sec] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, varargin)
+function [overlap,t_sec,causal] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, varargin)
 
 % Convolves a model window (see modelwin.m) with a segment of a given
 % duration. Useful for modeling TCI data.
@@ -23,6 +23,8 @@ function [overlap,t_sec] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, 
 % 
 % t_sec: corresponding timestamps
 % 
+% causal: returns whether the window was causal
+% 
 % -- Example --
 % 
 % segdur_sec = 0.2;
@@ -37,7 +39,7 @@ function [overlap,t_sec] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, 
 
 %% Optional inputs
 
-time_boundary = [-1,1]*(3*segdur_sec + 3*intper_sec + abs(delay_sec));
+time_boundary = [-1,1]*(3*segdur_sec + 4*intper_sec + abs(delay_sec));
 % modelwin_time_boundary = [-intper_sec*3, intper_sec*3]+delay_sec;
 % time_boundary = [min(seg_time_boundary(1),modelwin_time_boundary(1)), max(seg_time_boundary(2), modelwin_time_boundary(2))];
 
@@ -67,6 +69,9 @@ I.forcecausal = false;
 % median: delay is the median value
 % start: delay is the first non-zero point
 I.delaypoint = 'peak';
+
+% interval used to calculate integration period
+I.centralinterval = 0.75;
 
 % window applied to beginning / end of segment
 I.rampwin = 'none';
@@ -122,9 +127,9 @@ switch I.rampwin
 end
 
 % model window
-h = modelwin(distr, intper_sec, delay_sec,...
+[h,~,causal] = modelwin(distr, intper_sec, delay_sec,...
     'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
-    'tsec', internal_tsec);
+    'tsec', internal_tsec, 'centralinterval', I.centralinterval);
 
 % convolve
 internal_overlap = myconv(seg', h', 'causal', false, 'central_point', zero_tp);
