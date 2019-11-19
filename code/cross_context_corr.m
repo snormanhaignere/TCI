@@ -223,7 +223,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     L.same_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
     L.diff_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.n_total_segs = zeros(1,n_seg_durs, I.nbstraps+1);
+    L.n_total_segs = zeros(n_seg_durs,I.nbstraps+1);
     if I.nperms>0
         L.same_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
         L.diff_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
@@ -459,7 +459,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
             
             %% Weighted correlation
                         
-            for b = 0:I.nbstraps
+            for b = 0:I.nbstraps % b = 0, no bootstrapping
                 
                 if b > 0
                     fprintf('Bootstrap %d\n', b); drawnow;
@@ -505,7 +505,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                     
                     if q == 1
-                        L.n_total_segs(1,i,b+1) = L.n_total_segs(1,i,b+1) + n_valid_segs;
+                        try
+                            L.n_total_segs(i,b+1) = L.n_total_segs(i,b+1) + n_valid_segs;
+                        catch
+                            keyboard
+                        end
                     end
                     for k = 1:n_reps
                         for l = (k+1):n_reps
