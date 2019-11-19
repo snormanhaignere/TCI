@@ -221,17 +221,12 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     %% Main analysis
     
-    L.same_context = zeros(n_lags, n_seg_durs, n_channels);
-    L.diff_context = zeros(n_lags, n_seg_durs, n_channels);
-    L.n_total_segs = zeros(1,n_seg_durs);
+    L.same_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
+    L.diff_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
+    L.n_total_segs = zeros(1,n_seg_durs, I.nbstraps+1);
     if I.nperms>0
         L.same_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
         L.diff_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
-    end
-    if I.nbstraps>0
-        L.same_context_bstrap = zeros(n_lags, n_seg_durs, I.nbstraps, n_channels);
-        L.diff_context_bstrap = zeros(n_lags, n_seg_durs, I.nbstraps, n_channels);
-        L.n_total_segs_bstrap = zeros(1, n_seg_durs, I.nbstraps);
     end
     L.mean_diff_tc = zeros(n_lags, n_seg_durs, n_channels);
     L.mean_diff_tc_segdur = zeros(n_lags, n_seg_durs, n_seg_durs, n_channels);
@@ -252,6 +247,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
             otherwise
                 error('No matching boundary constraint');
         end
+        
         for i = 1:n_short_seg_durs
             
             %% Short segment context
@@ -509,10 +505,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                     
                     if q == 1
-                        L.n_total_segs(i) = L.n_total_segs(i) + n_valid_segs;
-                        if b > 0
-                            L.n_total_segs_bstrap(1,i,b) = L.n_total_segs_bstrap(1,i,b) + n_valid_segs;
-                        end
+                        L.n_total_segs(1,i,b+1) = L.n_total_segs(1,i,b+1) + n_valid_segs;
                     end
                     for k = 1:n_reps
                         for l = (k+1):n_reps
@@ -565,12 +558,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                         if p > 0
                                             assert(b==0);
                                             L.same_context_perm(:,i,p,q) = L.same_context_perm(:,i,p,q) + C' * weight;
-                                        elseif b > 0
-                                            assert(p==0);
-                                            L.same_context_bstrap(:,i,b,q) = L.same_context_bstrap(:,i,b,q) + C' * weight;
-                                            weight_sum_same_context = weight_sum_same_context + weight;
                                         else
-                                            L.same_context(:,i,q) = L.same_context(:,i,q) + C' * weight;
+                                            L.same_context(:,i,q,b+1) = L.same_context(:,i,q,b+1) + C' * weight;
                                             weight_sum_same_context = weight_sum_same_context + weight;
                                         end
 
@@ -600,11 +589,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                             if p > 0
                                                 assert(b==0);
                                                 L.diff_context_perm(:,i,p,q) = L.diff_context(:,i,p,q) + C' * weight;
-                                            elseif b > 0
-                                                assert(p==0);
-                                                L.diff_context_bstrap(:,i,b,q) = L.diff_context_bstrap(:,i,b,q) + C' * weight;
                                             else
-                                                L.diff_context(:,i,q) = L.diff_context(:,i,q) + C' * weight;
+                                                L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1) + C' * weight;
                                             end
                                             if p == 0
                                                 weight_sum_diff_context = weight_sum_diff_context + weight;
@@ -629,17 +615,15 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                 end
                 
+                L.same_context(:,i,q,b+1) = L.same_context(:,i,q,b+1)/weight_sum_same_context;
+                L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1)/weight_sum_diff_context;
+                
                 if b == 0
-                    L.same_context(:,i,q) = L.same_context(:,i,q)/weight_sum_same_context;
-                    L.diff_context(:,i,q) = L.diff_context(:,i,q)/weight_sum_diff_context;
                     L.mean_diff_tc(:,i,q) = L.mean_diff_tc(:,i,q)/weight_sum_diff_context;
                     if I.nperms>0
                         L.same_context_perm(:,i,:,q) = L.same_context_perm(:,i,:,q)/weight_sum_same_context;
                         L.diff_context_perm(:,i,:,q) = L.diff_context_perm(:,i,:,q)/weight_sum_diff_context;
                     end
-                else
-                    L.same_context_bstrap(:,i,b,q) = L.same_context_bstrap(:,i,b,q)/weight_sum_same_context;
-                    L.diff_context_bstrap(:,i,b,q) = L.diff_context_bstrap(:,i,b,q)/weight_sum_diff_context;
                 end
             end
         end
@@ -759,13 +743,8 @@ if I.plot_figure
             
             %% Lag results
             
-            if b == 0
-                same_context = L.same_context;
-                diff_context = L.diff_context;
-            else
-                same_context = squeeze_dims(L.same_context_bstrap(:,:,b,:),3);
-                diff_context = squeeze_dims(L.diff_context_bstrap(:,:,b,:),3);
-            end
+            same_context = L.same_context(:,:,:,b+1);
+            diff_context = L.diff_context(:,:,:,b+1);
             
             clf(I.figh);
             set(I.figh, 'Position', [100, 100, 900, 900]);
