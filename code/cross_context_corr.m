@@ -96,6 +96,9 @@ I.nbstraps = 0;
 % whether to bootstrap across sources or segments
 I.bstraptype = 'sources';
 
+% random seed, e.g. for bootstrapping
+I.randseed = 1;
+
 % whether to plot bootstrapped samples
 I.plot_bstraps = false;
 
@@ -193,6 +196,8 @@ switch I.simfunc
 end
 
 if ~exist(MAT_file, 'file') || I.overwrite
+    
+    ResetRandStream2(I.randseed);
     
     % segment durations
     clear L;
