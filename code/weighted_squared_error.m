@@ -13,4 +13,4 @@ W(xi) = 0;
 W = bsxfun(@times, W, 1./sum(W,1));
 
 % weighted squared error
-we = nansum(W.*(X - Y).^2);
+we = nansum(W.*(X - Y).^2,1);
