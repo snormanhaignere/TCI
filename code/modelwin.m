@@ -116,7 +116,7 @@ switch distr
         b = 1/I.shape;
         
         % ratio which to scale stimulus
-        default_intper = gaminv(central_interval(2),a,b) - norminv(central_interval(1),a,b);
+        default_intper = gaminv(central_interval(2),a,b) - gaminv(central_interval(1),a,b);
         r = intper_sec/default_intper;
         
         % offset to adust delay
