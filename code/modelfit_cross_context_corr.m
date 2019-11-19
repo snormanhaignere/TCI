@@ -76,14 +76,14 @@ I.shape = logspace(log10(1), log10(10), 10);
 I.winpowratio = true;
 
 % returns the best causal window, excluding non-causal windows
-I.bestcausal = true;
+I.bestcausal = false;
 
 % whether to force all windows to be causal
 % by zeroing time-points before stim onset
 I.forcecausal = false;
 
 % whether to only show errors in plots for causal windows
-I.plotcausal = true;
+I.plotcausal = false;
 
 % whether to transform the weighting applied to segments
 I.tranweightnsegs = 'none'; % applied to total segs
