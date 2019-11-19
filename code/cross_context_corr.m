@@ -365,8 +365,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         clear y;
                         
                         % find if shorter segment is on the boundary of the longer segment
-                        on_left_boundary = eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
-                        on_right_boundary = eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
+                        on_left_boundary = abs(shortseg_onset_relative_to_longseg-0)<1e-4; % eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
+                        on_right_boundary = abs(shortseg_onset_relative_to_longseg-(longseg_dur - shortseg_dur))<1e-4; %eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
                         on_either_boundary = on_left_boundary || on_right_boundary;
                         on_both_boundary = on_left_boundary && on_right_boundary;
                         switch I.boundary
@@ -426,8 +426,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             
                             % pick out response
                             targ_times = L.lag_t' + shortseg_start_time;
-                            ti = ge_tol(targ_times, t(1)) & le_tol(targ_times, t(end));
-                            Y_longsegs(k, ti, l, j, :) = interp1( t, X, targ_times(ti));
+                            ti = targ_times>(t(1)-1e-6) & targ_times < (targ_times+1e-6); % ge_tol(targ_times, t(1)) & le_tol(targ_times, t(end));
+                            Y_longsegs(k, ti, l, j, :) = interp1( t, X, targ_times(ti), 'linear' );
                         end
                     end
                     clear ti targ_times;
@@ -444,7 +444,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
             % exclude particular central segments
             stim_labels_shortsegs = repmat(1:n_sourcestim, n_shortsegs_per_sourcestim, 1);
             if ~isempty(I.excludesources)
-                valid_segs(ismember(stim_labels_shortsegs(:), I.excludesources(:))) = false;
+                valid_segs(ismember(stim_labels_shortsegs(:), I.excludesources(:)),:) = false;
             end
             
             %% Weighted correlation
