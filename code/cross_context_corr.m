@@ -442,9 +442,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
             valid_segs = squeeze_dims(valid_segs(:,1,:),2);
             
             % exclude particular central segments
-            stim_labels_shortsegs = repmat(1:n_sourcestim, n_shortsegs_per_sourcestim, 1);
+            source_labels = repmat(1:n_sourcestim, n_shortsegs_per_sourcestim, 1);
             if ~isempty(I.excludesources)
-                valid_segs(ismember(stim_labels_shortsegs(:), I.excludesources(:)),:) = false;
+                valid_segs(ismember(source_labels(:), I.excludesources(:)),:) = false;
             end
             
             %% Weighted correlation
