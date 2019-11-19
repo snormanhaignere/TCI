@@ -94,6 +94,12 @@ I.tranweightdenom = 'none';
 % whether to transform the predictions
 I.tranpred = 'none';
 
+% whether to create null samples with phase scrambling
+I.nullsmps = 0;
+
+% seed to create fixed random decision (e.g. for phase scrambling)
+I.randseed = 1;
+
 % whether to overwrite existing results
 I.overwrite = false;
 
@@ -110,7 +116,7 @@ I.plot_win = L.lag_t([1 end]); % in seconds
 I.ploterrquant = 0.1;
 
 % whether to plot bootstrapped samples
-I.plot_bstraps = false;
+I.plot_extrasmps = false;
 
 % whether to run the analysis
 % if false, just returns the parameters to be used
@@ -138,7 +144,7 @@ end
 always_include = {'distr'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', ...
-    'plotcausal', 'overwrite', 'ploterrquant', 'plot_bstraps'};
+    'plotcausal', 'overwrite', 'ploterrquant', 'plot_extrasmps'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
@@ -195,7 +201,7 @@ switch I.lossfn
         error('No matching loss for %s', I.lossfn);
 end
 
-[n_lags, n_seg, n_channels, n_smps] = size(L.same_context);
+[n_lags, n_seg, n_channels, ~] = size(L.same_context);
 assert(n_channels == length(L.channels));
 assert(length(L.unique_segs)==n_seg);
 assert(n_lags == length(L.lag_t))
@@ -204,10 +210,26 @@ assert(n_lags == length(L.lag_t))
 
 if ~exist(MAT_file, 'file') || I.overwrite
     
-    % measure to predict with the model
-    same_context = L.same_context;
-    diff_context = L.diff_context;
-    denom_factor = nan(size(L.same_context));
+    ResetRandStream2(I.randseed);
+    
+    % can optionally create null samples via phase scrambling
+    if I.nullsmps==0
+        same_context = L.same_context;
+        diff_context = L.diff_context;
+        denom_factor = nan(size(L.same_context));
+    else
+        assert(size(L.diff_context,4)==1); % there should only be one sample already (i.e. no bootstrapping)
+        diff_context_null = nan([n_lags, n_seg, n_channels, I.nullsmps]);
+        for i = 1:I.nullsmps
+            diff_context_null(:,:,:,i) = phasescram(L.diff_context);
+        end
+        diff_context = cat(4, L.diff_context, diff_context_null);
+        same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
+        denom_factor = nan(size(diff_context));
+    end
+    n_smps = size(same_context,4);
+
+    % create the vector to be predicted
     M.Y = nan(size(same_context));
     if I.normcorr
         assert(~I.divnorm);
@@ -224,7 +246,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.Y = same_context-diff_context;
         denom_factor(:) = 1;
     end
-    
+        
     % valid segment durations
     valid_seg_durs = find(L.n_total_segs(:,1)>0)';
     
@@ -326,13 +348,14 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.best_intper_sec = nan(n_channels,n_smps);
     M.best_delay_sec = nan(n_channels,n_smps);
     M.best_shape = nan(n_channels,n_smps);
+    M.best_loss = nan(n_channels,n_smps);
     for s = 1:n_smps
         for q = 1:n_channels
             X = M.loss(:,:,:,q,s);
             if any(M.causal_win(:)) && I.bestcausal
                 X(~M.causal_win) = inf;
             end
-            [~,xi] = min(X(:));
+            [M.best_loss(q,s),xi] = min(X(:));
             [a,b,c] = ind2sub(size(X), xi);
             M.best_intper_sec(q,s) = M.intper_sec(a);
             M.best_delay_sec(q,s) = M.delay_sec(b);
@@ -364,6 +387,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
     end
     
+    if I.nullsmps>0
+        M.logP_gaussfit = sig_via_null_gaussfit(-M.best_loss(:,1)', -M.best_loss(:,2:end)');
+        M.logP_counts = sig_via_null_counts(-M.best_loss(:,1)', -M.best_loss(:,2:end)');
+    end
+    
     M.channels = L.channels;
     
     save(MAT_file, 'M', '-v7.3');
@@ -385,8 +413,9 @@ if I.plot_figure
     
     plot_win_string = [num2str(I.plot_win(1)) '-' num2str(I.plot_win(2))];
     
+    n_smps = size(M.Y,4);
     n_channels = length(L.channels);
-    if I.plot_bstraps
+    if I.plot_extrasmps
         smps = 1:n_smps;
     else
         smps = 1;
@@ -402,9 +431,9 @@ if I.plot_figure
             end
             
             if s > 1
-                bstrapstr = ['_bstrap' num2str(s-1)];
+                smpstr = ['_smp' num2str(s-1)];
             else
-                bstrapstr = '';
+                smpstr = '';
             end
             
             % plot prediction for best delay, lineplot
@@ -441,7 +470,7 @@ if I.plot_figure
                 end
                 box off;
             end
-            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string bstrapstr]);
+            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr]);
             print_wrapper([fname '.png']);
             print_wrapper([fname '.pdf']);
             savefig(I.figh, mkpdir([fname '.fig']));
@@ -465,7 +494,7 @@ if I.plot_figure
                     title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
                 end
             end
-            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string bstrapstr]);
+            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr]);
             print_wrapper([fname '.png']);
             savefig(I.figh, mkpdir([fname '.fig']));
             % export_fig([fname '.png'], '-png', '-transparent', '-r100');
@@ -501,7 +530,7 @@ if I.plot_figure
                 xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
                 title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
                 set(gca, 'FontSize', 12);
-                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error' causal_string bstrapstr]);
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error' causal_string smpstr]);
                 print_wrapper([fname '.png']);
                 savefig(I.figh, mkpdir([fname '.fig']));
                 % export_fig([fname '.png'], '-png', '-transparent', '-r100');
