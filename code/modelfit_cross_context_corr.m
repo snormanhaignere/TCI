@@ -69,7 +69,7 @@ I.weightdenom = true;
 
 % range of shape parameters for gamma distribution
 % 1 -> exponential, higher -> more Gaussian
-I.shape = logspace(log10(1), log10(10), 10);
+I.shape = [1,2,3,5,10]; 
 
 % whether to use the power ratio between
 % segments to predict the correlation
