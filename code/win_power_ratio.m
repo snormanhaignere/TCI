@@ -30,7 +30,7 @@ I.centralinterval = 0.75;
 % window applied to beginning / end of segment
 % see winoverlap.m
 I.rampwin = 'none';
-I.rampdur = 0.03125; % duration of 
+I.rampdur = 0;
 
 % can optionally plot result
 I.plot = false;
