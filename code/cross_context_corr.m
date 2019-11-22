@@ -48,7 +48,7 @@ I.channels = 1:size(D,3);
 
 % whether to plot figures
 I.plot_figure = true;
-I.plot_adaptation = true;
+I.plot_adaptation = false;
 
 % range of values to plot
 % if NaN, chosen based on max value of data
@@ -745,9 +745,11 @@ if I.plot_figure
                     legend(h, legend_names{:}, 'Location', 'Best');
                     
                 end
-                export_fig(mkpdir([L.figure_directory '/cross-context-corr/' chname ...
+                fname = mkpdir([L.figure_directory '/cross-context-corr/' chname ...
                     '-win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2)) '-adapt' ...
-                    '-range' num2str(adapt_range(1), '%.2f') '-' num2str(adapt_range(2), '%.2f') '.pdf']), '-pdf', '-transparent');
+                    '-range' num2str(adapt_range(1), '%.2f') '-' num2str(adapt_range(2), '%.2f')]);
+                export_fig([fname '.pdf'], '-pdf', '-transparent');
+                export_fig([fname '.png'], '-png', '-transparent', '-r150');
             end
             
             %% Lag results
@@ -793,6 +795,7 @@ if I.plot_figure
                 fname = [fname '_bstrap' num2str(b)]; %#ok<AGROW>
             end
             export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
+            export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
         end
     end
 end
