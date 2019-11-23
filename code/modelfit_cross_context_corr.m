@@ -221,7 +221,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         assert(size(L.diff_context,4)==1); % there should only be one sample already (i.e. no bootstrapping)
         diff_context_null = nan([n_lags, n_seg, n_channels, I.nullsmps]);
         for i = 1:I.nullsmps
-            diff_context_null(:,:,:,i) = phasescram(L.diff_context);
+            diff_context_null(:,:,:,i) = real(phasescram(L.diff_context));
         end
         diff_context = cat(4, L.diff_context, diff_context_null);
         same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
