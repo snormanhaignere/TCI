@@ -426,10 +426,10 @@ if I.plot_figure
         for s = smps
             chan = L.channels(q);
             
-            if strcmp(L.chnames{chan}, ['ch' num2str(chan)])
-                chname = L.chnames{chan};
+            if strcmp(L.chnames{q}, ['ch' num2str(chan)])
+                chname = L.chnames{q};
             else
-                chname = ['ch' num2str(chan) '-' L.chnames{chan}];
+                chname = ['ch' num2str(chan) '-' L.chnames{q}];
             end
             
             if s > 1
@@ -523,11 +523,11 @@ if I.plot_figure
                 imagesc(X, bounds);
                 colormap(cmap);
                 colorbar;
-                yticks = round(get(gca, 'YTick'));
+                yticks = unique(round(linspace(1, length(M.intper_sec), 5)));
                 set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
                 % ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
                 % set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
-                xticks = round(get(gca, 'XTick'));
+                xticks = unique(round(linspace(1, length(M.delay_sec), 5)));
                 set(gca, 'XTick', xticks, 'XTickLabel', 1000*M.delay_sec(xticks));
                 xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
                 title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));

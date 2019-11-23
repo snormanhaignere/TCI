@@ -150,7 +150,7 @@ if ~I.run
     clear L;
     L.channels = I.channels;
     L.param_string = param_string;
-    L.chnames = I.chnames;
+    L.chnames = I.chnames(I.channels);
     L.boundary = I.boundary;
     L.figure_directory = [I.figure_directory '/' param_string];
     L.output_directory = [I.output_directory '/' param_string];
@@ -649,7 +649,7 @@ end
 % save additional parameters
 L.channels = I.channels;
 L.param_string = param_string;
-L.chnames = I.chnames;
+L.chnames = I.chnames(I.channels);
 L.boundary = I.boundary;
 L.figure_directory = [I.figure_directory '/' param_string];
 L.output_directory = [I.output_directory '/' param_string];
@@ -686,10 +686,10 @@ if I.plot_figure
         
         chan = L.channels(q);
         
-        if strcmp(L.chnames{chan}, ['ch' num2str(chan)])
-            chname = L.chnames{chan};
+        if strcmp(L.chnames{q}, ['ch' num2str(chan)])
+            chname = L.chnames{q};
         else
-            chname = ['ch' num2str(chan) '-' L.chnames{chan}];
+            chname = ['ch' num2str(chan) '-' L.chnames{q}];
         end
         
         if I.plot_bstraps
