@@ -66,4 +66,10 @@ for i = 1:length(L)
     M{i}.best_shape = M_all.best_shape(chan,:);
     M{i}.best_loss = M_all.best_loss(chan,:);
     M{i}.channels = M_all.channels(chan);
+    if isfield(M_all, 'logP_gaussfit')
+        M{i}.logP_gaussfit = M_all.logP_gaussfit(chan);
+    end
+    if isfield(M_all, 'logP_counts')
+        M{i}.logP_counts = M_all.logP_counts(chan);
+    end
 end
