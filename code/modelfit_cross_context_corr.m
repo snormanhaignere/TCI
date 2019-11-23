@@ -473,9 +473,11 @@ if I.plot_figure
                 box off;
             end
             fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr]);
-            print_wrapper([fname '.png']);
-            print_wrapper([fname '.pdf']);
-            savefig(I.figh, mkpdir([fname '.fig']));
+            % print_wrapper([fname '.png']);
+            % print_wrapper([fname '.pdf']);
+            export_fig([fname '.pdf'], '-pdf', '-transparent');
+            export_fig([fname '.png'], '-png', '-transparent', '-r150');
+            savefig(I.figh, [fname '.fig']);
             
             % plot prediction for best delay, image
             clf(I.figh);
@@ -497,9 +499,9 @@ if I.plot_figure
                 end
             end
             fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr]);
-            print_wrapper([fname '.png']);
-            savefig(I.figh, mkpdir([fname '.fig']));
-            % export_fig([fname '.png'], '-png', '-transparent', '-r100');
+            % print_wrapper([fname '.png']);
+            export_fig([fname '.png'], '-png', '-transparent', '-r150');
+            savefig(I.figh, [fname '.fig']);
             
             % plot the error vs. parameters
             X = M.loss(:,:,M.best_shape(q,s)==M.shape,q,s);
@@ -533,9 +535,9 @@ if I.plot_figure
                 title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
                 set(gca, 'FontSize', 12);
                 fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error' causal_string smpstr]);
-                print_wrapper([fname '.png']);
-                savefig(I.figh, mkpdir([fname '.fig']));
-                % export_fig([fname '.png'], '-png', '-transparent', '-r100');
+                % print_wrapper([fname '.png']);
+                export_fig([fname '.png'], '-png', '-transparent', '-r150');
+                savefig(I.figh, [fname '.fig']);
                 % clear X;
             end
         end
