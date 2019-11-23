@@ -97,6 +97,9 @@ I.tranpred = 'none';
 % whether to create null samples with phase scrambling
 I.nullsmps = 0;
 
+% skip calculation of the best predictors for null samples
+I.skipnullpreds = true;
+
 % seed to create fixed random decision (e.g. for phase scrambling)
 I.randseed = 1;
 
@@ -228,7 +231,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         denom_factor = nan(size(diff_context));
     end
     n_smps = size(same_context,4);
-
+    
     % create the vector to be predicted
     M.Y = nan(size(same_context));
     if I.normcorr
@@ -246,7 +249,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.Y = same_context-diff_context;
         denom_factor(:) = 1;
     end
-        
+    
     % valid segment durations
     valid_seg_durs = find(L.n_total_segs(:,1)>0)';
     
@@ -363,25 +366,27 @@ if ~exist(MAT_file, 'file') || I.overwrite
             clear X;
             
             % get prediction
-            for k = valid_seg_durs
-                
-                [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
-                    M.best_intper_sec(q,s), M.best_delay_sec(q,s), ...
-                    'shape', M.best_shape(q,s), 'forcecausal', I.forcecausal, ...
-                    'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                    'centralinterval', I.centralinterval, 'delaypoint', I.delaypoint);
-                if I.winpowratio
-                    predictor_notrans = winpow;
-                else
-                    predictor_notrans = overlap;
-                end
-                predictor_notrans(predictor_notrans<0) = 0;
-                predictor = tranpred(predictor_notrans);
-                
-                if I.normcorr || I.divnorm
-                    M.Ybest(:,k,q,s) = predictor;
-                else
-                    M.Ybest(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,k,q,s);
+            if s == 1 || ~I.skipnullpreds
+                for k = valid_seg_durs
+                    
+                    [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
+                        M.best_intper_sec(q,s), M.best_delay_sec(q,s), ...
+                        'shape', M.best_shape(q,s), 'forcecausal', I.forcecausal, ...
+                        'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                        'centralinterval', I.centralinterval, 'delaypoint', I.delaypoint);
+                    if I.winpowratio
+                        predictor_notrans = winpow;
+                    else
+                        predictor_notrans = overlap;
+                    end
+                    predictor_notrans(predictor_notrans<0) = 0;
+                    predictor = tranpred(predictor_notrans);
+                    
+                    if I.normcorr || I.divnorm
+                        M.Ybest(:,k,q,s) = predictor;
+                    else
+                        M.Ybest(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,k,q,s);
+                    end
                 end
             end
         end
@@ -439,69 +444,71 @@ if I.plot_figure
             end
             
             % plot prediction for best delay, lineplot
-            clf(I.figh);
-            set(I.figh, 'Position', [100, 100, 900, 900]);
-            if I.normcorr || I.divnorm
-                corr_range = [-0.5 1.5];
-                invariance_line = 1;
-            else
-                X = M.Y(:,:,q,s);
-                corr_range = quantile(X(:), [0.01, 0.99]);
-                clear X;
-                invariance_line = NaN;
-            end
-            valid_seg_durs = find(L.n_total_segs(:,1)>0)';
-            for k = valid_seg_durs
-                subplot(4, 2, k);
-                if I.normcorr
-                    plot(L.lag_t([1 end]) * 1000, [1,1], 'k--', 'LineWidth', 2);
+            if s == 1 || ~I.skipnullpreds
+                clf(I.figh);
+                set(I.figh, 'Position', [100, 100, 900, 900]);
+                if I.normcorr || I.divnorm
+                    corr_range = [-0.5 1.5];
+                    invariance_line = 1;
+                else
+                    X = M.Y(:,:,q,s);
+                    corr_range = quantile(X(:), [0.01, 0.99]);
+                    clear X;
+                    invariance_line = NaN;
                 end
-                hold on;
-                plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', 2);
-                h1 = plot(L.lag_t * 1000, M.Y(:,k,q,s), 'LineWidth', 2);
-                h2 = plot(L.lag_t * 1000, M.Ybest(:,k,q,s), 'LineWidth', 2);
-                plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', 2);
-                if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
-                xlim(I.plot_win * 1000);
-                ylim(corr_range);
-                xlabel('Time Lag (ms)');
-                ylabel('Pearson Correlation');
-                title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
-                if k == 1
-                    legend([h1, h2], 'Data', 'Model');
+                valid_seg_durs = find(L.n_total_segs(:,1)>0)';
+                for k = valid_seg_durs
+                    subplot(4, 2, k);
+                    if I.normcorr
+                        plot(L.lag_t([1 end]) * 1000, [1,1], 'k--', 'LineWidth', 2);
+                    end
+                    hold on;
+                    plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', 2);
+                    h1 = plot(L.lag_t * 1000, M.Y(:,k,q,s), 'LineWidth', 2);
+                    h2 = plot(L.lag_t * 1000, M.Ybest(:,k,q,s), 'LineWidth', 2);
+                    plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', 2);
+                    if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
+                    xlim(I.plot_win * 1000);
+                    ylim(corr_range);
+                    xlabel('Time Lag (ms)');
+                    ylabel('Pearson Correlation');
+                    title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
+                    if k == 1
+                        legend([h1, h2], 'Data', 'Model');
+                    end
+                    box off;
                 end
-                box off;
-            end
-            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr]);
-            % print_wrapper([fname '.png']);
-            % print_wrapper([fname '.pdf']);
-            export_fig([fname '.pdf'], '-pdf', '-transparent');
-            export_fig([fname '.png'], '-png', '-transparent', '-r150');
-            savefig(I.figh, [fname '.fig']);
-            
-            % plot prediction for best delay, image
-            clf(I.figh);
-            set(I.figh, 'Position', [100, 100, 900, 600]);
-            subplot(2,1,1);
-            imagesc(M.Y(:,:,q,s)', corr_range(2) * [-1, 1]);
-            subplot(2,1,2);
-            imagesc(M.Ybest(:,:,q,s)', corr_range(2) * [-1, 1]);
-            for i = 1:2
-                subplot(2,1,i);
-                colorbar;
-                colormap(flipud(cbrewer('div', 'RdBu', 128)));
-                set(gca, 'YTick', 1:length(L.unique_segs), 'YTickLabel', L.unique_segs);
-                xticks = get(gca, 'XTick');
-                set(gca, 'XTick', xticks, 'XTickLabel', L.lag_t(xticks)*1000);
-                ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
-                if i == 2
-                    title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr]);
+                % print_wrapper([fname '.png']);
+                % print_wrapper([fname '.pdf']);
+                export_fig([fname '.pdf'], '-pdf', '-transparent');
+                export_fig([fname '.png'], '-png', '-transparent', '-r150');
+                savefig(I.figh, [fname '.fig']);
+                
+                % plot prediction for best delay, image
+                clf(I.figh);
+                set(I.figh, 'Position', [100, 100, 900, 600]);
+                subplot(2,1,1);
+                imagesc(M.Y(:,:,q,s)', corr_range(2) * [-1, 1]);
+                subplot(2,1,2);
+                imagesc(M.Ybest(:,:,q,s)', corr_range(2) * [-1, 1]);
+                for i = 1:2
+                    subplot(2,1,i);
+                    colorbar;
+                    colormap(flipud(cbrewer('div', 'RdBu', 128)));
+                    set(gca, 'YTick', 1:length(L.unique_segs), 'YTickLabel', L.unique_segs);
+                    xticks = get(gca, 'XTick');
+                    set(gca, 'XTick', xticks, 'XTickLabel', L.lag_t(xticks)*1000);
+                    ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
+                    if i == 2
+                        title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
+                    end
                 end
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr]);
+                % print_wrapper([fname '.png']);
+                export_fig([fname '.png'], '-png', '-transparent', '-r150');
+                savefig(I.figh, [fname '.fig']);
             end
-            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr]);
-            % print_wrapper([fname '.png']);
-            export_fig([fname '.png'], '-png', '-transparent', '-r150');
-            savefig(I.figh, [fname '.fig']);
             
             % plot the error vs. parameters
             X = M.loss(:,:,M.best_shape(q,s)==M.shape,q,s);
