@@ -1,4 +1,4 @@
-function [M, MAT_file] = modelfit_cross_context_corr_fast(L, varargin)
+function [M, MAT_file] = modelfit_cross_context_corr(L, varargin)
 
 % Fit parametric window using cross-context correlation data. This function
 % should be applied to the output structure L returned by
@@ -15,7 +15,7 @@ clear I;
 I.lossfn = 'sqerr';
 
 % distribution used to model the window
-% only 'gamma' allowed currently
+% 'gamma' or 'gauss'
 I.distr = 'gamma';
 
 % shape parameter for parametric window, not relevant for gaussian
@@ -31,6 +31,10 @@ I.intper_range = L.unique_segs([1 end])/1000; % in seconds
 % number of integration periods to consider between this range
 % spaced on a logarithmic scale
 I.nintper = 20;
+
+% how to calculate delay
+% options are 'peak', 'median', or 'start' (if causal)
+I.delaypoint = 'median';
 
 % range of delays to consider in seconds
 I.delay_range = [0, L.unique_segs(end)/1000];
@@ -65,11 +69,21 @@ I.weightdenom = true;
 
 % range of shape parameters for gamma distribution
 % 1 -> exponential, higher -> more Gaussian
-I.shape = [1,2,3,5];
+I.shape = [1,2,3,5,10];
 
 % whether to use the power ratio between
 % segments to predict the correlation
 I.winpowratio = true;
+
+% returns the best causal window, excluding non-causal windows
+I.bestcausal = true;
+
+% whether to force all windows to be causal
+% by zeroing time-points before stim onset
+I.forcecausal = false;
+
+% whether to only show errors in plots for causal windows
+I.plotcausal = true;
 
 % whether to transform the weighting applied to segments
 I.tranweightnsegs = 'none'; % applied to total segs
@@ -95,12 +109,6 @@ I.overwrite = false;
 % whether to enter debug mode
 I.keyboard = false;
 
-% how to quantify delay in the plots
-I.plot_delaystat = 'median';
-
-% range of delays to plot
-I.plot_delay_range = [0, L.unique_segs(end)/1000];
-
 % whether to plot figures
 I.plot_figure = true;
 
@@ -108,7 +116,7 @@ I.plot_figure = true;
 I.plot_win = L.lag_t([1 end]); % in seconds
 
 % quantile of error map to plot
-I.ploterrquant = 0.3;
+I.ploterrquant = 0.1;
 
 % whether to plot bootstrapped samples
 I.plot_extrasmps = false;
@@ -124,16 +132,22 @@ I.figh = matlab.ui.Figure.empty;
 
 [I, ~, C_value] = parse_optInputs_keyvalue(varargin, I);
 
+% if using gaussian distribution
+% shape is fixed
+if strcmp(I.distr, 'gauss')
+    I.shape = 1;
+end
+
 % enter debug mode here
 if I.keyboard
     keyboard;
 end
 
 % string with modeling parameters
-always_include = {'lossfn'};
+always_include = {'distr'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', ...
-    'overwrite', 'ploterrquant', 'plot_extrasmps', 'plot_delaystat', 'plot_delay_range'};
+    'plotcausal', 'overwrite', 'ploterrquant', 'plot_extrasmps'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
@@ -241,51 +255,46 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % integration period
     M.intper_sec = logspace(log10(I.intper_range(1)), log10(I.intper_range(2)), I.nintper);
-    M.delay_sec_start = I.delay_range(1):I.delay_interval:I.delay_range(2);
-    M.delay_sec_start = round(M.delay_sec_start*L.sr)/L.sr;    
+    M.delay_sec = I.delay_range(1):I.delay_interval:I.delay_range(2);
     M.shape = I.shape;
-    M.loss = nan(length(M.intper_sec), length(M.delay_sec_start), length(M.shape), n_channels, n_smps);
+    M.loss = nan(length(M.intper_sec), length(M.delay_sec), length(M.shape), n_channels, n_smps);
+    % M.Yh = nan([n_lags, n_seg, length(M.intper_sec), length(M.delay_sec), length(M.shape), n_channels]);
+    M.causal_win = false(length(M.intper_sec), length(M.delay_sec), length(M.shape));
     for m = 1:length(M.shape)
         for i = 1:length(M.intper_sec)
             fprintf('shape %.2f, intper %.0f ms\n', M.shape(m), M.intper_sec(i)*1000);
             drawnow;
-            
-            % calculate predictions for each segment
-            Y_model = nan(n_lags, n_seg);
-            for k = valid_seg_durs
+            for j = 1:length(M.delay_sec)
                 
-                tic;
-                [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, ...
-                    I.distr, M.intper_sec(i), 0, ...
-                    'shape', M.shape(m), 'tsec', L.lag_t, ...
-                    'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                    'centralinterval', I.centralinterval, 'delaypoint', 'start');
-                if I.winpowratio
-                    predictor_notrans = winpow;
-                else
-                    predictor_notrans = overlap;
+                Y_model = nan(n_lags, n_seg);
+                
+                % calculate predictions for each segment
+                for k = valid_seg_durs
+                    
+                    [winpow, ~, overlap, M.causal_win(i,j,m)] = win_power_ratio(L.unique_segs(k)/1000, ...
+                        I.distr, M.intper_sec(i), M.delay_sec(j), ...
+                        'shape', M.shape(m), 'forcecausal', I.forcecausal, ...
+                        'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                        'centralinterval', I.centralinterval, 'delaypoint', I.delaypoint);
+                    if I.winpowratio
+                        predictor_notrans = winpow;
+                    else
+                        predictor_notrans = overlap;
+                    end
+                    predictor_notrans(predictor_notrans<0) = 0;
+                    predictor = tranpred(predictor_notrans);
+                    
+                    Y_model(:,k) = predictor;
+                    
                 end
-                predictor_notrans(predictor_notrans<0) = 0;
-                predictor = tranpred(predictor_notrans);
-                
-                Y_model(:,k) = predictor;
-                toc;
-                
-            end
-            
-            % create delays
-            Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
-            
-            for j = 1:length(M.delay_sec_start)
                 
                 if I.normcorr || I.divnorm
-                    Y_pred = repmat(Y_model_with_delays(:,:,j), [1, 1, n_channels, n_smps]);
+                    Y_pred = repmat(Y_model, [1, 1, n_channels, n_smps]);
                 else
                     Y_pred = nan(size(same_context));
                     for s = 1:n_smps
                         for q = 1:n_channels
                             for k = valid_seg_durs
-                                predictor = Y_model_with_delays(:,k,j);
                                 Y_pred(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,k,q,s);
                             end
                         end
@@ -340,19 +349,20 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % find best prediction
     M.Ybest = nan(n_lags, n_seg, n_channels, n_smps);
     M.best_intper_sec = nan(n_channels,n_smps);
-    M.best_delay_sec_start = nan(n_channels,n_smps);
-    M.best_delay_sec_median = nan(n_channels,n_smps);
+    M.best_delay_sec = nan(n_channels,n_smps);
     M.best_shape = nan(n_channels,n_smps);
     M.best_loss = nan(n_channels,n_smps);
     for s = 1:n_smps
         for q = 1:n_channels
             X = M.loss(:,:,:,q,s);
+            if any(M.causal_win(:)) && I.bestcausal
+                X(~M.causal_win) = inf;
+            end
             [M.best_loss(q,s),xi] = min(X(:));
             [a,b,c] = ind2sub(size(X), xi);
             M.best_intper_sec(q,s) = M.intper_sec(a);
-            M.best_delay_sec_start(q,s) = M.delay_sec_start(b);
+            M.best_delay_sec(q,s) = M.delay_sec(b);
             M.best_shape(q,s) = M.shape(c);
-            M.best_delay_sec_median(q,s) = modelwin_convert_delay(M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), M.best_shape(q,s), 'median');
             clear X;
             
             % get prediction
@@ -360,10 +370,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 for k = valid_seg_durs
                     
                     [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
-                        M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), ...
-                        'shape', M.best_shape(q,s), 'tsec', L.lag_t, ...
-                        'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                        'centralinterval', I.centralinterval, 'delaypoint', 'start');
+                        M.best_intper_sec(q,s), M.best_delay_sec(q,s), ...
+                        'shape', M.best_shape(q,s), 'forcecausal', I.forcecausal, ...
+                        'tsec', L.lag_t, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                        'centralinterval', I.centralinterval, 'delaypoint', I.delaypoint);
                     if I.winpowratio
                         predictor_notrans = winpow;
                     else
@@ -491,7 +501,7 @@ if I.plot_figure
                     set(gca, 'XTick', xticks, 'XTickLabel', L.lag_t(xticks)*1000);
                     ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
                     if i == 2
-                        title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec_median(q,s)*1000));
+                        title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
                     end
                 end
                 fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr]);
@@ -500,35 +510,25 @@ if I.plot_figure
                 savefig(I.figh, [fname '.fig']);
             end
             
-            % delays to plot
-            X_start_delays = M.loss(:,:,M.best_shape(q,s)==M.shape,q,s); 
-            if ~strcmp(I.plot_delaystat, 'start')
-                delay_sec_altstat = nan(size(X_start_delays));
-                for l = 1:length(M.intper_sec)
-                    delay_sec_altstat(l,:) = modelwin_convert_delay(M.intper_sec(l), M.delay_sec_start, M.best_shape(q,s), I.plot_delaystat);
-                end
-                delays_to_plot = I.plot_delay_range(1):I.delay_interval:I.plot_delay_range(2);
-                X_altdelays = nan(length(M.intper_sec), length(delays_to_plot));
-                for l = 1:length(M.intper_sec)
-                    xi = delays_to_plot > delay_sec_altstat(l,1) & delays_to_plot < delay_sec_altstat(l,end);
-                    X_altdelays(l,xi) = interp1(delay_sec_altstat(l,:), X_start_delays(l,:), delays_to_plot(xi));
-                end
-                X_altdelays(isnan(X_altdelays)) = inf;
-                X = X_altdelays;
-            else
-                X = X_start_delays;
-            end
-                        
             % plot the error vs. parameters
+            X = M.loss(:,:,M.best_shape(q,s)==M.shape,q,s);
+            if any(M.causal_win(:)) && I.plotcausal
+                causal_string = '_only-causal';
+                X(~M.causal_win(:,:,M.best_shape(q,s)==M.shape)) = inf;
+            else
+                causal_string = '';
+            end
+            
             cmap = flipud(cbrewer('seq', 'Reds', 128));
             [minX,zi] = min(X(:));
-            [~, xi] = ind2sub(size(X), zi);
-            bounds = [minX, quantile(X(:,xi), I.ploterrquant)];
+            [xi, ~] = ind2sub(size(X), zi);
+            bounds = [minX, quantile(X(xi,:), I.ploterrquant)];
             clear xi zi;
             % bounds = quantile(-X(:), [1-I.ploterrquant, 1]);
             if ~all(isnan(X(:)))
                 clf(I.figh);
                 set(I.figh, 'Position', [100, 100, 600, 600]);
+                
                 imagesc(X, bounds);
                 colormap(cmap);
                 colorbar;
@@ -536,12 +536,12 @@ if I.plot_figure
                 set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
                 % ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
                 % set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
-                xticks = unique(round(linspace(1, length(delays_to_plot), 5)));
-                set(gca, 'XTick', xticks, 'XTickLabel', 1000*delays_to_plot(xticks));
+                xticks = unique(round(linspace(1, length(M.delay_sec), 5)));
+                set(gca, 'XTick', xticks, 'XTickLabel', 1000*M.delay_sec(xticks));
                 xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
-                title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec_median(q,s)*1000));
+                title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s)*1000, M.best_delay_sec(q,s)*1000));
                 set(gca, 'FontSize', 12);
-                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error-delay-' I.plot_delaystat smpstr]);
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error' causal_string smpstr]);
                 % print_wrapper([fname '.png']);
                 export_fig([fname '.png'], '-png', '-transparent', '-r150');
                 savefig(I.figh, [fname '.fig']);
