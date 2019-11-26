@@ -181,7 +181,7 @@ end
 % function used to evaluate lossfn
 switch I.lossfn
     case 'sqerr'
-        lossfn = @(x,y,w)weighted_squared_error(x,y,w);
+        lossfn = @(x,y,w)sum(w.*bsxfun(@minus, x, y).^2,1);
     case 'nse'
         lossfn = @(x,y,w)weighted_nse(x,y,w);
     case 'corr'
@@ -238,6 +238,34 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % valid segment durations
     valid_seg_durs = find(L.n_total_segs(:,1)>0)';
+    n_valid_segdurs = length(valid_seg_durs);
+
+    % denominator weights
+    % lag x segdur x channel x sample
+    W_denom = denom_factor;
+    W_denom(~(W_denom>I.mindenom)) = 0;
+    W_denom = tranweightdenomfn(W_denom);
+    
+    % segment dependent weights
+    % segdur x sample (i.e. for bootstrapping)
+    W_segs = tranweightnsegsfn(L.n_total_segs);
+    
+    % combine
+    W_total = bsxfun(@times, W_denom, reshape(W_segs, [1, size(W_segs,1), 1, size(W_segs,2)]));
+    
+    % format
+    Y_data_valid = M.Y(:,valid_seg_durs,:,:);
+    W_total_valid = W_total(:,valid_seg_durs,:,:);
+    Y_data_valid = reshape(Y_data_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    W_total_valid = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    
+    % set weights for invalid lags to zero
+    invalid_lags = isnan(Y_data_valid);
+    W_total_valid(invalid_lags) = 0;
+    Y_data_valid(invalid_lags) = 0;
+    
+    % normalize weights
+    W_total_valid = bsxfun(@times, W_total_valid, 1./sum(W_total_valid,1));
     
     % integration period
     M.intper_sec = logspace(log10(I.intper_range(1)), log10(I.intper_range(2)), I.nintper);
@@ -251,9 +279,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
             drawnow;
             
             % calculate predictions for each segment
-            Y_model = nan(n_lags, n_seg);
-            for k = valid_seg_durs
-                [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, ...
+            Y_model = nan(n_lags, n_valid_segdurs);
+            for k = 1:n_valid_segdurs
+                [winpow, ~, overlap] = win_power_ratio(L.unique_segs(valid_seg_durs(k))/1000, ...
                     I.distr, M.intper_sec(i), 0, ...
                     'shape', M.shape(m), 'tsec', L.lag_t, ...
                     'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
@@ -275,39 +303,22 @@ if ~exist(MAT_file, 'file') || I.overwrite
             for j = 1:length(M.delay_sec_start)
                 
                 if I.normcorr || I.divnorm
-                    Y_pred = repmat(Y_model_with_delays(:,:,j), [1, 1, n_channels, n_smps]);
+                    Y_pred = Y_model_with_delays(:,:,j);
                 else
                     Y_pred = nan(size(same_context));
                     for s = 1:n_smps
                         for q = 1:n_channels
-                            for k = valid_seg_durs
+                            for k = 1:n_valid_segdurs   
                                 predictor = Y_model_with_delays(:,k,j);
-                                Y_pred(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,k,q,s);
+                                Y_pred(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,valid_seg_durs(k),q,s);
                             end
                         end
                     end
                 end
                 
-                % denominator weights
-                % lag x segdur x channel x sample
-                W_denom = denom_factor;
-                W_denom(~(W_denom>I.mindenom)) = 0;
-                W_denom = tranweightdenomfn(W_denom);
-                
-                % segment dependent weights
-                % segdur x sample (i.e. for bootstrapping)
-                W_segs = tranweightnsegsfn(L.n_total_segs);
-                
-                % combine
-                W_total = bsxfun(@times, W_denom, reshape(W_segs, [1, size(W_segs,1), 1, size(W_segs,2)]));
-                
                 % format
-                Y_pred_valid = Y_pred(:,valid_seg_durs,:,:);
-                Y_data_valid = M.Y(:,valid_seg_durs,:,:);
-                W_total_valid = W_total(:,valid_seg_durs,:,:);
-                Y_pred_valid = reshape(Y_pred_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-                Y_data_valid = reshape(Y_data_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-                W_total_valid = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+                d = [size(Y_pred),1];
+                Y_pred_valid = reshape(Y_pred, [n_lags * n_valid_segdurs, d(3:end)]);
                 
                 % calculate loss
                 M.loss(i,j,m,:,:) = lossfn(Y_pred_valid, Y_data_valid, W_total_valid);
