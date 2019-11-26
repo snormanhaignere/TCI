@@ -1,4 +1,4 @@
-function [M, MAT_file] = modelfit_cross_context_corr_fast(L, varargin)
+function [M, MAT_file] = modelfit_cross_context_corr(L, varargin)
 
 % Fit parametric window using cross-context correlation data. This function
 % should be applied to the output structure L returned by
@@ -122,13 +122,18 @@ I.figh = matlab.ui.Figure.empty;
 
 %% Parse user-specified parameters, create parameter string for this analysis
 
-[I, ~, C_value] = parse_optInputs_keyvalue(varargin, I);
+[I, C, C_value] = parse_optInputs_keyvalue(varargin, I);
 
 % enter debug mode here
 if I.keyboard
     keyboard;
 end
 
+% set plotting range to actual range, if not otherwise specified
+if C.delay_range && ~C.plot_delay_range
+    I.plot_delay_range = I.delay_range;
+end
+    
 % string with modeling parameters
 always_include = {'lossfn'};
 always_exclude = {...
