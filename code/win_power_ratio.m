@@ -19,7 +19,7 @@ I.sr = NaN;
 I.tsec = [];
 
 % this is the target sampling rate used for internal computations
-I.target_sr = 1000;
+I.target_sr = 100/(min([intper_sec, segdur_sec]));
 
 % parameters of the window see modelwin.m
 I.shape = 1;
