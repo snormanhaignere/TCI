@@ -1,9 +1,12 @@
 function wr = weighted_pearson_corr(X,Y,W)
 
 % Calculates weighted Pearson correlation between corresponding columns of
-% X and Y, weighted by W. X, Y, and W should all be the same size.
+% X and Y, weighted by W.
 % 
 % 2019-11-18: Created, Sam NH
+% 
+% 2019-11-27: Got rid of some house-keeping that was slowing thiings down.
+% Also using bsxfun for matrix expansion.
 %
 % -- Example -- 
 % N = 1000;
@@ -11,30 +14,26 @@ function wr = weighted_pearson_corr(X,Y,W)
 % w = rand(N,1)*5;
 % x = s + randn(N,1).*w;
 % y = s + randn(N,1).*w;
+% invW = 1./w;
 % corr(x,y)
-% weighted_pearson_corr(x,y,ones(size(x)))
-% weighted_pearson_corr(x,y,1./w)
+% weighted_pearson_corr(x,y,ones(size(x))/N)
+% weighted_pearson_corr(x,y,invW/sum(invW))
 
-assert(all(size(X)==size(Y)));
-assert(all(size(X)==size(W)));
+% weighted means
+Mx = sum(bsxfun(@times, W, X),1);
+My = sum(bsxfun(@times, W, Y),1);
 
-% remove NaNs
-xi = isnan(X) | isnan(Y) | isnan(W);
-X(xi) = NaN;
-Y(xi) = NaN;
-W(xi) = 0;
+% demeaned variables
+X_demean = bsxfun(@minus, X, Mx);
+Y_demean = bsxfun(@minus, Y, My);
 
-% normalize weights
-W = bsxfun(@times, W, 1./sum(W,1));
+% weighted variances
+vx = sum(bsxfun(@times, W, X_demean.^2),1);
+vy = sum(bsxfun(@times, W, Y_demean.^2),1);
 
-% weighted means and variances
-mx = nansum(W.*X,1);
-my = nansum(W.*Y,1);
-vx = nansum(W.*(X-mx).^2,1);
-vy = nansum(W.*(Y-my).^2,1);
-
-% % weighted covariance
-cxy = nansum(W.*(X-mx).*(Y-my));
+% % weighted covariances
+XY = bsxfun(@times, X_demean, Y_demean);
+cxy = sum(bsxfun(@times, W, XY), 1);
     
 % Pearson correlation
-wr = cxy ./ sqrt(vx.*vy);
+wr = cxy ./ sqrt(bsxfun(@times, vx, vy));
