@@ -1,4 +1,4 @@
-function [M, MAT_file] = modelfit_cross_context_corr_newloss(L, varargin)
+function [M, MAT_file] = modelfit_cross_context_corr(L, varargin)
 
 % Fit parametric window using cross-context correlation data. This function
 % should be applied to the output structure L returned by
@@ -44,8 +44,24 @@ I.delay_interval = 1/L.sr;
 I.rampwin = L.rampwin;
 I.rampdur = L.rampdur; % in seconds
 
+% whether to normalize cross-context correlation
+% divisively by same-context correlation for each lag
+I.divnorm = true;
+
 % lags with a same-context correlation below this value are excluded
-I.minreliability = 0.01;
+% the same-context correlation which appears in the denominator
+% (i.e. cross-context / same-context)
+I.mindenom = 0.01;
+
+% an alternative to divcorr
+% here we normalize by the average of the same-context
+% correlation over the window
+I.normcorr = false;
+
+% whether to weight the errors by the strength
+% of the same-context correlation which appears
+% in the denomitor (i.e. cross-context / same-context)
+I.weightdenom = true;
 
 % range of shape parameters for gamma distribution
 % 1 -> exponential, higher -> more Gaussian
@@ -57,6 +73,9 @@ I.winpowratio = true;
 
 % whether to transform the weighting applied to segments
 I.tranweightnsegs = 'none'; % applied to total segs
+
+% whether to transform the weighting applied to the denominator
+I.tranweightdenom = 'none';
 
 % whether to transform the predictions
 I.tranpred = 'none';
@@ -154,6 +173,16 @@ switch I.tranweightnsegs
         error('No matching tranweightnsegs parameter');
 end
 
+% function used to transform weights
+switch I.tranweightdenom
+    case 'none'
+        tranweightdenomfn = @(x)x;
+    case 'square'
+        tranweightdenomfn = @(x)x.^2;
+    otherwise
+        error('No matching tranweightdenom parameter');
+end
+
 % function used to evaluate lossfn
 switch I.lossfn
     case 'sqerr'
@@ -178,51 +207,70 @@ if ~exist(MAT_file, 'file') || I.overwrite
     ResetRandStream2(I.randseed);
     
     % can optionally create null samples via phase scrambling
-    clear M;
     if I.nullsmps==0
-        M.same_context = L.same_context;
-        M.diff_context = L.diff_context;
+        same_context = L.same_context;
+        diff_context = L.diff_context;
+        denom_factor = nan(size(L.same_context));
     else
         assert(size(L.diff_context,4)==1); % there should only be one sample already (i.e. no bootstrapping)
         diff_context_null = nan([n_lags, n_seg, n_channels, I.nullsmps]);
         for i = 1:I.nullsmps
             diff_context_null(:,:,:,i) = real(phasescram(L.diff_context));
         end
-        M.diff_context = cat(4, L.diff_context, diff_context_null);
-        M.same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
+        diff_context = cat(4, L.diff_context, diff_context_null);
+        same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
+        denom_factor = nan(size(diff_context));
     end
-    n_smps = size(M.diff_context,4);
+    n_smps = size(same_context,4);
+    
+    % create the vector to be predicted
+    M.Y = nan(size(same_context));
+    if I.normcorr
+        assert(~I.divnorm);
+        baseline = mean(same_context);
+        M.Y = 1 - bsxfun(@times, (same_context-diff_context), 1./baseline);
+        denom_factor = repmat(baseline, [size(same_context,1), ones(1, ndims(same_context)-1)]);
+    elseif I.divnorm
+        assert(~I.normcorr);
+        xi = same_context > I.mindenom;
+        M.Y(xi) = diff_context(xi) ./ same_context(xi);
+        denom_factor(xi) = same_context(xi);
+        clear xi;
+    else
+        M.Y = same_context-diff_context;
+        denom_factor(:) = 1;
+    end
     
     % valid segment durations
     valid_seg_durs = find(L.n_total_segs(:,1)>0)';
     n_valid_segdurs = length(valid_seg_durs);
 
+    % denominator weights
+    % lag x segdur x channel x sample
+    W_denom = denom_factor;
+    W_denom(~(W_denom>I.mindenom)) = 0;
+    W_denom = tranweightdenomfn(W_denom);
+    
     % segment dependent weights
     % segdur x sample (i.e. for bootstrapping)
     W_segs = tranweightnsegsfn(L.n_total_segs);
     
-    % reshape
-    W_total = reshape(W_segs, [1, size(W_segs,1), 1, size(W_segs,2)]);
-    W_total = repmat(W_total, [n_lags, 1, n_channels, 1]);
+    % combine
+    W_total = bsxfun(@times, W_denom, reshape(W_segs, [1, size(W_segs,1), 1, size(W_segs,2)]));
     
-    % select valid segments
-    same_context_valid = M.same_context(:,valid_seg_durs,:,:);
-    diff_context_valid = M.diff_context(:,valid_seg_durs,:,:);
+    % format
+    Y_data_valid = M.Y(:,valid_seg_durs,:,:);
     W_total_valid = W_total(:,valid_seg_durs,:,:);
-    
-    % unwrap lag and segment duration into one vectory
-    same_context_format = reshape(same_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-    diff_context_format = reshape(diff_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-    W_total_format = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    Y_data_valid = reshape(Y_data_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    W_total_valid = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
     
     % set weights for invalid lags to zero
-    invalid_lags = same_context_format < I.minreliability;
-    W_total_format(invalid_lags) = 0;
-    same_context_format(invalid_lags) = 0;
-    diff_context_format(invalid_lags) = 0;
+    invalid_lags = isnan(Y_data_valid);
+    W_total_valid(invalid_lags) = 0;
+    Y_data_valid(invalid_lags) = 0;
     
     % normalize weights
-    W_total_format = bsxfun(@times, W_total_format, 1./sum(W_total_format,1));
+    W_total_valid = bsxfun(@times, W_total_valid, 1./sum(W_total_valid,1));
     
     % integration period
     M.intper_sec = logspace(log10(I.intper_range(1)), log10(I.intper_range(2)), I.nintper);
@@ -232,7 +280,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.loss = nan(length(M.intper_sec), length(M.delay_sec_start), length(M.shape), n_channels, n_smps);
     for m = 1:length(M.shape)
         for i = 1:length(M.intper_sec)
-            fprintf('shape %.2f, intper %.0f ms\n', M.shape(m), M.intper_sec(i)*1000);drawnow;
+            fprintf('shape %.2f, intper %.0f ms\n', M.shape(m), M.intper_sec(i)*1000);
+            drawnow;
             
             % calculate predictions for each segment
             Y_model = nan(n_lags, n_valid_segdurs);
@@ -254,25 +303,54 @@ if ~exist(MAT_file, 'file') || I.overwrite
             end
             
             % create delays
-            % lag x segment duration x time delays
             Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
             
             for j = 1:length(M.delay_sec_start)
                 
-                % multiply model prediction by same-context correlation
-                % to get a prediction of the different context correlation
-                X = Y_model_with_delays(:,:,j);
-                diff_context_pred = bsxfun(@times, same_context_format, X(:));
+                if I.normcorr || I.divnorm
+                    Y_pred = Y_model_with_delays(:,:,j);
+                else
+                    Y_pred = nan(size(same_context));
+                    for s = 1:n_smps
+                        for q = 1:n_channels
+                            for k = 1:n_valid_segdurs   
+                                predictor = Y_model_with_delays(:,k,j);
+                                Y_pred(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,valid_seg_durs(k),q,s);
+                            end
+                        end
+                    end
+                end
+                
+                % format
+                d = [size(Y_pred),1];
+                Y_pred_valid = reshape(Y_pred, [n_lags * n_valid_segdurs, d(3:end)]);
                 
                 % calculate loss
-                M.loss(i,j,m,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
+                M.loss(i,j,m,:,:) = lossfn(Y_pred_valid, Y_data_valid, W_total_valid);
                 
+                %                 % calculate error
+                %                 for q = 1:n_channels
+                %                     %E = (Yh(:,valid_seg_durs,q) - M.Y(:,valid_seg_durs,q)).^2;
+                %                     if I.weightdenom
+                %                         W_denom = denom_factor(:,valid_seg_durs,q);
+                %                         W_denom(~(W_denom>I.mindenom)) = 0;
+                %                         W_denom = tranweightdenomfn(W_denom);
+                %                     else
+                %                         W_total = W_segs(valid_seg_durs);
+                %                     end
+                %                     % w_total = w_total / sum(w_total(:));
+                %                     X1 = Y_pred(:,valid_seg_durs,q);
+                %                     X2 = M.Y(:,valid_seg_durs,q);
+                %                     % Ew = bsxfun(@times, E, w_total);
+                %                     M.loss(i,j,m,q) = lossfn(X1(:), X2(:), W_total(:));
+                %                     clear w_total w_denom;
+                %                 end
             end
         end
     end
     
     % find best prediction
-    M.diff_context_bestpred = nan(n_lags, n_seg, n_channels, n_smps);
+    M.Ybest = nan(n_lags, n_seg, n_channels, n_smps);
     M.best_intper_sec = nan(n_channels,n_smps);
     M.best_delay_sec_start = nan(n_channels,n_smps);
     M.best_delay_sec_median = nan(n_channels,n_smps);
@@ -306,7 +384,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     predictor_notrans(predictor_notrans<0) = 0;
                     predictor = tranpred(predictor_notrans);
                     
-                    M.diff_context_bestpred(:,k,q,s) = bsxfun(@times, predictor, M.same_context(:,k,q,s));
+                    if I.normcorr || I.divnorm
+                        M.Ybest(:,k,q,s) = predictor;
+                    else
+                        M.Ybest(:,k,q,s) = (1-predictor)*pinv(1-predictor)*M.Y(:,k,q,s);
+                    end
                 end
             end
         end
@@ -340,7 +422,7 @@ if I.plot_figure
     
     plot_win_string = [num2str(I.plot_win(1)) '-' num2str(I.plot_win(2))];
     
-    n_smps = size(M.diff_context,4);
+    n_smps = size(M.Y,4);
     n_channels = length(L.channels);
     if I.plot_extrasmps
         smps = 1:n_smps;
@@ -367,18 +449,25 @@ if I.plot_figure
             if s == 1 || ~I.skipnullpreds
                 clf(I.figh);
                 set(I.figh, 'Position', [100, 100, 900, 900]);
-                
-                X = M.diff_context(:,:,q,s);
-                corr_range = quantile(X(:), [0.01, 0.99]);
-                clear X;
-                invariance_line = NaN;
+                if I.normcorr || I.divnorm
+                    corr_range = [-0.5 1.5];
+                    invariance_line = 1;
+                else
+                    X = M.Y(:,:,q,s);
+                    corr_range = quantile(X(:), [0.01, 0.99]);
+                    clear X;
+                    invariance_line = NaN;
+                end
                 valid_seg_durs = find(L.n_total_segs(:,1)>0)';
                 for k = valid_seg_durs
                     subplot(4, 2, k);
+                    if I.normcorr
+                        plot(L.lag_t([1 end]) * 1000, [1,1], 'k--', 'LineWidth', 2);
+                    end
                     hold on;
                     plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', 2);
-                    h1 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s), 'LineWidth', 2);
-                    h2 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s), 'LineWidth', 2);
+                    h1 = plot(L.lag_t * 1000, M.Y(:,k,q,s), 'LineWidth', 2);
+                    h2 = plot(L.lag_t * 1000, M.Ybest(:,k,q,s), 'LineWidth', 2);
                     plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', 2);
                     if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
                     xlim(I.plot_win * 1000);
@@ -402,9 +491,9 @@ if I.plot_figure
                 clf(I.figh);
                 set(I.figh, 'Position', [100, 100, 900, 600]);
                 subplot(2,1,1);
-                imagesc(M.diff_context(:,:,q,s)', corr_range(2) * [-1, 1]);
+                imagesc(M.Y(:,:,q,s)', corr_range(2) * [-1, 1]);
                 subplot(2,1,2);
-                imagesc(M.diff_context_bestpred(:,:,q,s)', corr_range(2) * [-1, 1]);
+                imagesc(M.Ybest(:,:,q,s)', corr_range(2) * [-1, 1]);
                 for i = 1:2
                     subplot(2,1,i);
                     colorbar;

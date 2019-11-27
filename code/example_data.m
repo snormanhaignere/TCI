@@ -16,4 +16,5 @@ L = cross_context_corr(D, t, S, 'chnames', chnames, ...
 
 %% Model-fitting
 
-M = modelfit_cross_context_corr(L, 'overwrite', true);
+M = modelfit_cross_context_corr(L, 'overwrite', true, ...
+    'shape', [1,2,3,5], 'lossfn', 'nse');
