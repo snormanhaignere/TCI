@@ -1,4 +1,4 @@
-function [M, MAT_file] = modelfit_cross_context_corr_newloss(L, varargin)
+function [M, MAT_file] = modelfit_cross_context_corr(L, varargin)
 
 % Fit parametric window using cross-context correlation data. This function
 % should be applied to the output structure L returned by
