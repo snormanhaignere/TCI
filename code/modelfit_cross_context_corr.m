@@ -203,7 +203,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % reshape
     W_total = reshape(W_segs, [1, size(W_segs,1), 1, size(W_segs,2)]);
-    W_total = repmat(W_total, [n_lags, 1, n_channels, 1]);
+    if I.nullsmps==0
+        W_total = repmat(W_total, [n_lags, 1, n_channels, 1]);
+    else
+        W_total = repmat(W_total, [n_lags, 1, n_channels, n_smps]);
+    end
     
     % select valid segments
     same_context_valid = M.same_context(:,valid_seg_durs,:,:);
