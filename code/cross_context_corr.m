@@ -646,6 +646,14 @@ else
     
 end
 
+% same context err
+if I.nbstraps>0
+    X = L.same_context(:,:,:,2:end);
+    Y = bsxfun(@minus, X, mean(X,4)).^2;
+    L.same_context_err = mean(Y(:,:,:,:),4);
+    clear X;
+end
+
 % save additional parameters
 L.channels = I.channels;
 L.param_string = param_string;

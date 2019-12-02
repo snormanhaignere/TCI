@@ -158,6 +158,8 @@ end
 switch I.lossfn
     case 'sqerr'
         lossfn = @(x,y,w)sum(w.*bsxfun(@minus, x, y).^2,1);
+    case 'unbiased-sqerr'
+        lossfn = @(x,y,w,e)sum(w.*bsxfun(@minus, x, y).^2 - w.*e,1);
     case 'nse'
         lossfn = @(x,y,w)weighted_nse(x,y,w);
     case 'corr'
@@ -182,6 +184,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
     if I.nullsmps==0
         M.same_context = L.same_context;
         M.diff_context = L.diff_context;
+        if strcmp(I.lossfn, 'unbiased-sqerr')
+            M.same_context_err = L.same_context_err;
+        end
     else
         assert(size(L.diff_context,4)==1); % there should only be one sample already (i.e. no bootstrapping)
         diff_context_null = nan([n_lags, n_seg, n_channels, I.nullsmps]);
@@ -190,6 +195,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
         M.diff_context = cat(4, L.diff_context, diff_context_null);
         M.same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
+        if strcmp(I.lossfn, 'unbiased-sqerr')
+            M.same_context_err = repmat(L.same_context_err, [1, 1, 1, I.nullsmps+1]);
+        end
     end
     n_smps = size(M.diff_context,4);
     
@@ -213,17 +221,30 @@ if ~exist(MAT_file, 'file') || I.overwrite
     same_context_valid = M.same_context(:,valid_seg_durs,:,:);
     diff_context_valid = M.diff_context(:,valid_seg_durs,:,:);
     W_total_valid = W_total(:,valid_seg_durs,:,:);
-    
+    if strcmp(I.lossfn, 'unbiased-sqerr')
+        same_context_err_valid = M.same_context_err(:,valid_seg_durs,:,:);
+    end
+        
     % unwrap lag and segment duration into one vectory
     same_context_format = reshape(same_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
     diff_context_format = reshape(diff_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-    W_total_format = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    try
+        W_total_format = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
+    catch
+        keyboard
+    end
+    if strcmp(I.lossfn, 'unbiased-sqerr')
+        same_context_err_format = reshape(same_context_err_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);    
+    end
     
     % set weights for invalid lags to zero
     invalid_lags = same_context_format < I.minreliability;
     W_total_format(invalid_lags) = 0;
     same_context_format(invalid_lags) = 0;
     diff_context_format(invalid_lags) = 0;
+    if strcmp(I.lossfn, 'unbiased-sqerr')
+        same_context_err_format(invalid_lags) = 0;
+    end
     
     % normalize weights
     W_total_format = bsxfun(@times, W_total_format, 1./sum(W_total_format,1));
@@ -269,8 +290,12 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 diff_context_pred = bsxfun(@times, same_context_format, X(:));
                 
                 % calculate loss
-                M.loss(i,j,m,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
-                
+                if strcmp(I.lossfn, 'unbiased-sqerr')
+                    err = bsxfun(@times, same_context_err_format, X(:).^2);
+                    M.loss(i,j,m,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format, err);
+                else
+                    M.loss(i,j,m,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
+                end
             end
         end
     end

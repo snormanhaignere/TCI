@@ -12,7 +12,7 @@ function wnse = weighted_nse(X,Y,W)
 % -- Example -- 
 % N = 1000;
 % s = randn(N,1);
-% w = rand(N,1)*5;
+% w = randn(N,1)*5;
 % x = s + randn(N,1).*w;
 % y = s + randn(N,1).*w;
 % invW = 1./w;
