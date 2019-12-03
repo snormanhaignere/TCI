@@ -646,11 +646,11 @@ else
     
 end
 
-% same context err
+% same context s
 if I.nbstraps>0
     X = L.same_context(:,:,:,2:end);
     Y = bsxfun(@minus, X, mean(X,4)).^2;
-    L.same_context_err = mean(Y(:,:,:,:),4);
+    L.same_context_bstrap_err = mean(Y(:,:,:,:),4);
     clear X;
 end
 

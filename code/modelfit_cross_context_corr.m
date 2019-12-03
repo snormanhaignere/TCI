@@ -12,7 +12,10 @@ clear I;
 % sqerr: squared error
 % nse: normalized squared error
 % corr: negative Pearson correlation
-I.lossfn = 'sqerr';
+I.lossfn = 'sqerr'; 
+
+% how to estimate error if using unbiased squared error
+I.esterr = 'bstrap';
 
 % distribution used to model the window
 % only 'gamma' allowed currently
@@ -190,7 +193,15 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.same_context = L.same_context;
         M.diff_context = L.diff_context;
         if strcmp(I.lossfn, 'unbiased-sqerr')
-            M.same_context_err = L.same_context_err;
+            switch I.esterr
+                case 'bstrap'
+                    M.same_context_err = L.same_context_bstrap_err;
+                case 'neglag'
+                    M.same_context_err = mean(L.diff_context(L.lag_t<0,:,:,:).^2,1);
+                    M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.diff_context)-1)]);
+                otherwise
+                    error('No matching case for esterr=%s\n', I.esterr);
+            end
         end
     else
         assert(size(L.diff_context,4)==1); % there should only be one sample already (i.e. no bootstrapping)
@@ -201,7 +212,15 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.diff_context = cat(4, L.diff_context, diff_context_null);
         M.same_context = repmat(L.same_context, [1, 1, 1, I.nullsmps+1]);
         if strcmp(I.lossfn, 'unbiased-sqerr')
-            M.same_context_err = repmat(L.same_context_err, [1, 1, 1, I.nullsmps+1]);
+            switch I.esterr
+                case 'bstrap'
+                    M.same_context_err = repmat(L.same_context_bstrap_err, [1, 1, 1, I.nullsmps+1]);
+                case 'neglag'
+                    M.same_context_err = mean(L.diff_context(L.lag_t<0,:).^2,1);
+                    M.same_context_err = repmat(M.same_context_err, [n_lags, 1, 1, I.nullsmps+1]);
+                otherwise
+                    error('No matching case for esterr=%s\n', I.esterr);
+            end
         end
     end
     n_smps = size(M.diff_context,4);
@@ -233,11 +252,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % unwrap lag and segment duration into one vectory
     same_context_format = reshape(same_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
     diff_context_format = reshape(diff_context_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-    try
-        W_total_format = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
-    catch
-        keyboard
-    end
+    W_total_format = reshape(W_total_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);
     if strcmp(I.lossfn, 'unbiased-sqerr')
         same_context_err_format = reshape(same_context_err_valid, [n_lags * length(valid_seg_durs), n_channels, n_smps]);    
     end
