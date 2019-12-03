@@ -22,8 +22,13 @@ I.distr = 'gamma';
 % 1 -> exponential, higher -> more gaussian
 I.shape = 1;
 
-% central interval used to calculate integration period
-I.centralinterval = 0.75;
+% density interval used to calculate integration period
+% intervaltype:
+% 'highest': highest density interval (default, the minimal interval of a given mass)
+% 'center': central interval, i.e. from [0+(1-intervalmass)/2, 1-(1-intervalmass)/2]
+% 'start': starting interval, i.e. from [0 to intervalmass]
+I.intervaltype = 'highest';
+I.intervalmass = 0.75;
 
 % range of integration periods to consider in seconds
 I.intper_range = L.unique_segs([1 end])/1000; % in seconds
@@ -266,7 +271,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     I.distr, M.intper_sec(i), 0, ...
                     'shape', M.shape(m), 'tsec', L.lag_t, ...
                     'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                    'centralinterval', I.centralinterval, 'delaypoint', 'start');
+                    'intervalmass', I.intervalmass, ...
+                    'intervaltype', I.intervaltype, ...
+                    'delaypoint', 'start');
                 if I.winpowratio
                     predictor_notrans = winpow;
                 else
@@ -326,7 +333,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), ...
                         'shape', M.best_shape(q,s), 'tsec', L.lag_t, ...
                         'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                        'centralinterval', I.centralinterval, 'delaypoint', 'start');
+                        'intervalmass', I.intervalmass, ...
+                        'intervaltype', I.intervaltype, ...
+                        'delaypoint', 'start');
                     if I.winpowratio
                         predictor_notrans = winpow;
                     else

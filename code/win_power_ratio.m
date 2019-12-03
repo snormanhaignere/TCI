@@ -25,7 +25,8 @@ I.target_sr = 100/(min([intper_sec, segdur_sec]));
 I.shape = 1;
 I.delaypoint = 'peak';
 I.forcecausal = false;
-I.centralinterval = 0.75;
+I.intervalmass = 0.75;
+I.intervaltype = 'center';
 
 % window applied to beginning / end of segment
 % see winoverlap.m
@@ -48,7 +49,7 @@ segdur_smps = checkint(segdur_sec * internal_sr);
 [h, t, causal] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, ...
      'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
      'plot', false,'internal_sr', internal_sr, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-     'centralinterval', I.centralinterval);
+     'intervalmass', I.intervalmass, 'intervaltype', I.intervaltype);
 h(h<0) = 0;
 
 % create delayed copies

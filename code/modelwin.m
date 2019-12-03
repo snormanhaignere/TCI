@@ -56,8 +56,13 @@ I.forcecausal = false;
 % start: delay is the first non-zero point
 I.delaypoint = 'peak';
 
-% interval used to calculate integration period
-I.centralinterval = 0.75;
+% density interval used to calculate integration period
+% intervaltype:
+% 'highest': highest density interval (default, the minimal interval of a given mass)
+% 'center': central interval, i.e. from [0+(1-intervalmass)/2, 1-(1-intervalmass)/2]
+% 'start': starting interval, i.e. from [0 to intervalmass]
+I.intervaltype = 'highest';
+I.intervalmass = 0.75;
 
 % can optionally return the CDF of the window
 I.cdf = false;
@@ -80,9 +85,27 @@ end
 
 %% Window
 
-low_tail = (1-I.centralinterval)/2;
-high_tail = 1-low_tail;
-central_interval = [low_tail, high_tail];
+switch I.intervaltype
+    case 'center'
+        low_tail = (1-I.intervalmass)/2;
+        high_tail = 1-low_tail;
+        mass_interval = [low_tail, high_tail];
+    case 'start'
+        low_tail = 0;
+        high_tail = I.intervalmass;
+        mass_interval = [low_tail, high_tail];
+    case 'highest'
+        load('highest_density_interval_gamma.mat', 'H');
+        xi = abs(H.mass-I.intervalmass)<1e-6;
+        yi = abs(H.shape-I.shape)<1e-6;
+        assert(sum(xi)==1);
+        assert(sum(yi)==1);
+        low_tail = H.lowtail(xi,yi);
+        high_tail = low_tail + I.intervalmass;
+        mass_interval = [low_tail, high_tail];
+    otherwise
+        error('No matching interval type');
+end
 
 switch distr
     case 'gauss'
@@ -92,7 +115,7 @@ switch distr
         end
         
         % gaussian window
-        default_intper = norminv(central_interval(2),0,1) - norminv(central_interval(1),0,1);
+        default_intper = norminv(mass_interval(2),0,1) - norminv(mass_interval(1),0,1);
         sig_sec = intper_sec / default_intper;
         if I.cdf
             h = normcdf(t_sec - delay_sec, 0, sig_sec);
@@ -116,7 +139,7 @@ switch distr
         b = 1/I.shape;
         
         % ratio which to scale stimulus
-        default_intper = gaminv(central_interval(2),a,b) - gaminv(central_interval(1),a,b);
+        default_intper = gaminv(mass_interval(2),a,b) - gaminv(mass_interval(1),a,b);
         r = intper_sec/default_intper;
         
         % offset to adust delay

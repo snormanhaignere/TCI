@@ -70,8 +70,13 @@ I.forcecausal = false;
 % start: delay is the first non-zero point
 I.delaypoint = 'peak';
 
-% interval used to calculate integration period
-I.centralinterval = 0.75;
+% density interval used to calculate integration period
+% intervaltype:
+% 'highest': highest density interval (default, the minimal interval of a given mass)
+% 'center': central interval, i.e. from [0+(1-intervalmass)/2, 1-(1-intervalmass)/2]
+% 'start': starting interval, i.e. from [0 to intervalmass]
+I.intervaltype = 'highest';
+I.intervalmass = 0.75;
 
 % window applied to beginning / end of segment
 I.rampwin = 'none';
@@ -129,7 +134,8 @@ end
 % model window
 [h,~,causal] = modelwin(distr, intper_sec, delay_sec,...
     'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
-    'tsec', internal_tsec, 'centralinterval', I.centralinterval);
+    'tsec', internal_tsec, 'intervalmass', I.intervalmass, ...
+    'intervaltype', I.intervaltype);
 
 % convolve
 internal_overlap = myconv(seg', h', 'causal', false, 'central_point', zero_tp);
