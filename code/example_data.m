@@ -10,6 +10,9 @@ load(data_file, 'D', 't', 'S', 'chnames');
 
 %% Cross-context correlation
 
+root_directory = '/Users/svnh2/Desktop/projects';
+addpath([root_directory '/general-analysis-code']);
+addpath([root_directory '/export_fig_v3']);
 directory_to_save_results = [TCI_directory '/results'];
 L = cross_context_corr(D, t, S, 'chnames', chnames, ...
     'output_directory', directory_to_save_results, 'boundary', 'none');
