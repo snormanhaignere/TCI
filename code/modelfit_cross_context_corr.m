@@ -199,6 +199,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 case 'neglag'
                     M.same_context_err = mean(L.diff_context(L.lag_t<0,:,:,:).^2,1);
                     M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.diff_context)-1)]);
+                case 'neglag-smps'
+                    xi = randi(sum(L.lag_t<0), [n_lags,1]);
+                    M.same_context_err = L.diff_context(xi, :, :, :).^2;
                 otherwise
                     error('No matching case for esterr=%s\n', I.esterr);
             end
@@ -218,6 +221,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 case 'neglag'
                     M.same_context_err = mean(L.diff_context(L.lag_t<0,:).^2,1);
                     M.same_context_err = repmat(M.same_context_err, [n_lags, 1, 1, I.nullsmps+1]);
+                case 'neglag-smps'
+                    xi = randi(sum(L.lag_t<0), [n_lags,1]);
+                    M.same_context_err = L.diff_context(xi, :, :, :).^2;
+                    M.same_context_err = repmat(M.same_context_err, [1, 1, 1, I.nullsmps+1]);
                 otherwise
                     error('No matching case for esterr=%s\n', I.esterr);
             end
