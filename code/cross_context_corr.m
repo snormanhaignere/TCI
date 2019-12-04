@@ -226,7 +226,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     %% Main analysis
     
+    L.same_context_smp1 = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
+    L.same_context_smp2 = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
     L.same_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
+    L.same_context_err = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
     L.diff_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
     L.n_total_segs = zeros(n_seg_durs,I.nbstraps+1);
     if I.nperms>0
@@ -558,22 +561,24 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                         X2 = [short_rep2(1:2:end,:); long_rep1(2:2:end,:)];
                                         Y1 = [long_rep2(1:2:end,:); short_rep1(2:2:end,:)];
                                         Y2 = [long_rep1(1:2:end,:); short_rep2(2:2:end,:)];
-                                        C = trancorrfn(simfunc(X1, X2))/2 + trancorrfn(simfunc(Y1, Y2))/2;
+                                        C1 = trancorrfn(simfunc(X1, X2));
+                                        C2 = trancorrfn(simfunc(Y1, Y2));
                                         clear X1 X2 Y1 Y2;
                                     else
-                                        C = (trancorrfn(simfunc(short_rep1, short_rep2))/2 + trancorrfn(simfunc(long_rep1, long_rep2))/2);
+                                        C1 = trancorrfn(simfunc(short_rep1, short_rep2));
+                                        C2 = trancorrfn(simfunc(long_rep1, long_rep2));
                                     end
-                                    if all(~isnan(C))
+                                    if all(~isnan(C1)) && all(~isnan(C2))
                                         if p > 0
                                             assert(b==0);
                                             L.same_context_perm(:,i,p,q) = L.same_context_perm(:,i,p,q) + C' * weight;
                                         else
-                                            L.same_context(:,i,q,b+1) = L.same_context(:,i,q,b+1) + C' * weight;
+                                            L.same_context_smp1(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1) + C1' * weight;
+                                            L.same_context_smp2(:,i,q,b+1) = L.same_context_smp2(:,i,q,b+1) + C2' * weight;
                                             weight_sum_same_context = weight_sum_same_context + weight;
                                         end
-
                                     end
-                                    clear C;
+                                    clear C1 C2;
                                     
                                     for n = orders_to_use
                                         
@@ -624,7 +629,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                 end
                 
-                L.same_context(:,i,q,b+1) = L.same_context(:,i,q,b+1)/weight_sum_same_context;
+                L.same_context_smp1(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1)/weight_sum_same_context;
+                L.same_context_smp2(:,i,q,b+1) = L.same_context_smp2(:,i,q,b+1)/weight_sum_same_context;
+                L.same_context(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1)/2 + L.same_context_smp2(:,i,q,b+1)/2;
+                L.same_context_err(:,i,q,b+1) = (L.same_context_smp1(:,i,q,b+1)/2 - L.same_context_smp2(:,i,q,b+1)/2).^2;
                 L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1)/weight_sum_diff_context;
                 
                 if b == 0

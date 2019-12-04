@@ -196,6 +196,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
             switch I.esterr
                 case 'bstrap'
                     M.same_context_err = L.same_context_bstrap_err;
+                case 'splithalf'
+                    M.same_context_err = L.same_context_err;
+                case 'splithalf-mean'
+                    M.same_context_err = mean(L.same_context_err,1);
+                    M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.same_context_err)-1)]);
                 case 'neglag'
                     M.same_context_err = mean(L.diff_context(L.lag_t<0,:,:,:).^2,1);
                     M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.diff_context)-1)]);
@@ -218,6 +223,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
             switch I.esterr
                 case 'bstrap'
                     M.same_context_err = repmat(L.same_context_bstrap_err, [1, 1, 1, I.nullsmps+1]);
+                case 'splithalf'
+                    M.same_context_err = repmat(L.same_context_err, [1, 1, 1, I.nullsmps+1]);
+                case 'splithalf-mean'
+                    M.same_context_err = mean(L.same_context_err,1);
+                    M.same_context_err = repmat(M.same_context_err, [n_lags, 1, 1, I.nullsmps+1]);
                 case 'neglag'
                     M.same_context_err = mean(L.diff_context(L.lag_t<0,:).^2,1);
                     M.same_context_err = repmat(M.same_context_err, [n_lags, 1, 1, I.nullsmps+1]);
