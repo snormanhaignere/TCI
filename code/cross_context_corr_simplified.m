@@ -743,6 +743,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                 end
                 
+                %% Divide by weights, combine groups
+                
                 % divide by weights
                 L.same_context_twogroups(:,i,q,b,1) = L.same_context_twogroups(:,i,q,b,1)/same_context_weight_twogroup(1);
                 L.same_context_twogroups(:,i,q,b,2) = L.same_context_twogroups(:,i,q,b,2)/same_context_weight_twogroup(2);
