@@ -11,13 +11,15 @@ load(data_file, 'D', 't', 'S', 'chnames');
 %% Cross-context correlation
 
 clc;
+tic;
 root_directory = '/Users/svnh2/Desktop/projects';
 addpath([root_directory '/general-analysis-code']);
 addpath([root_directory '/export_fig_v3']);
-directory_to_save_results = [TCI_directory '/results-simplified-v2'];
-L = cross_context_corr_simplified(D, t, S, 'chnames', chnames, ...
-    'output_directory', directory_to_save_results, 'boundary', 'none', ...
-    'overwrite', true, 'plot_figure', false);
+directory_to_save_results = [TCI_directory '/results/v4'];
+L = cross_context_corr_further_simplified(D, t, S, 'chnames', chnames, ...
+    'output_directory', directory_to_save_results, 'boundary', 'any', ...
+    'overwrite', false, 'plot_figure', true, 'interleave', true, 'lag_win', [0, 1]);
+toc;
 
 %% Model-fitting
 
