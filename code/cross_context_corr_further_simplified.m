@@ -16,7 +16,7 @@ function [L, MAT_file] = cross_context_corr_further_simplified(D, t, S, varargin
 clear I;
 
 % window used to compute lags
-I.lag_win = 2*max(S.segs(:))/1000*[-1,1];
+I.lag_win = 2*max(S.segs(:))/1000*[0,1];
 
 % window used for plotting
 I.plot_win = I.lag_win;
@@ -42,7 +42,10 @@ I.simfunc = 'corr';
 I.channels = 1:size(D,3);
 
 % whether to interleave shorter and longer segments
-I.interleave = true;
+I.interleave_diffdur = true;
+
+% whether to interleave segments of different orders but the same duration
+I.interleave_samedur = false;
 
 % can optionally force the longer of the two segment durations being
 % compared to have a fixed set of values
@@ -99,7 +102,11 @@ I.nperms = 0;
 % ** Still needs to be coded **
 I.nbstraps = 0;
 I.bstraptype = 'sources';
-I.plot_bstraps = false;
+
+% whether to plot additional
+% samples computed via permutation test
+% or bootstrapping
+I.plot_extra_smps = false;
 
 % random seed, only relevant for random processes
 % (e.g. permutation testing or bootstrapping)
@@ -148,7 +155,7 @@ always_include = {'boundary','lag_win'};
 always_exclude = {...
     'plot_win', 'plot_figure', 'plot_range', ...
     'keyboard', 'overwrite', 'output_directory', 'figure_directory', ...
-    'chnames', 'run', 'figh', 'plot_bstraps'};
+    'chnames', 'run', 'figh', 'plot_extra_smps'};
 param_string = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % MAT file to save results to
@@ -256,11 +263,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % whether to make any different duration comparisons
     make_diffdur_comparisons = ~any(ismember({'samedur'}, I.boundary));
     
-    %% Same duration, different context
+    %% Pairs of orders for same duration comparisons
     
-    % orders and repetitions for comparing segments of the same duration
+    % for same-duration comparisons, must always compare different orders
     if make_samedur_comparisons
-        
         samedur_order_pairs = [];
         for o1 = 1:n_orders
             for o2 = o1+1:n_orders
@@ -268,39 +274,15 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 samedur_order_pairs = cat(2, samedur_order_pairs, new_pair);
             end
         end
-        clear new_pair;
-        
-        % pairs of repetitions to use for diff context comparisons
-        samedur_diffcontext_rep_pairs = [];
-        for r1 = 1:n_reps
-            if I.samerep
-                second_reps = 1:n_reps;
-            else
-                second_reps = [1:r1-1,r1+1:n_reps];
-            end
-            for r2 = second_reps
-                new_pair = [r1, r2]';
-                samedur_diffcontext_rep_pairs = cat(2, samedur_diffcontext_rep_pairs, new_pair);
-            end
-            clear second_reps new_pair;
-        end
-        
-        % pairs of repetitions to use for same context comparisons
-        samedur_samecontext_rep_pairs = [];
-        for r1 = 1:n_reps
-            for r2 = r1+1:n_reps
-                new_pair = [r1, r2]';
-                samedur_samecontext_rep_pairs = cat(2, samedur_samecontext_rep_pairs, new_pair);
-            end
-            clear second_reps new_pair;
-        end
+        clear o1 o2 new_pair;
     end
     
-    %% Different duration, different context
+    %% Pairs of orders for different duration comparisons
     
+    % since the contexts are always different, we can consider
+    % all possible pairs of orders for those different durations
+    % i.e. o1-o1 is fine, o1-o2 is different from o2-o1
     if make_diffdur_comparisons
-        
-        % orders and repetitions for comparing segments of different duration
         diffdur_order_pairs = [];
         for o1 = 1:n_orders
             for o2 = 1:n_orders
@@ -308,34 +290,44 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 diffdur_order_pairs = cat(2, diffdur_order_pairs, new_pair);
             end
         end
-        
-        % pairs of repetitions to use for diff context comparisons
-        diffdur_diffcontext_rep_pairs = [];
-        for r1 = 1:n_reps
-            if I.samerep
-                second_reps = 1:n_reps;
-            else
-                second_reps = [1:r1-1,r1+1:n_reps];
-            end
-            for r2 = second_reps
-                new_pair = [r1, r2]';
-                diffdur_diffcontext_rep_pairs = cat(2, diffdur_diffcontext_rep_pairs, new_pair);
-            end
-            clear second_reps;
-        end
-        
-        % pairs of repetitions to use for same context comparisons
-        diffdur_samecontext_rep_pairs = [];
-        for r1 = 1:n_reps
-            for r2 = r1+1:n_reps
-                new_pair = [r1, r2]';
-                diffdur_samecontext_rep_pairs = cat(2, diffdur_samecontext_rep_pairs, new_pair);
-            end
-            clear second_reps;
-        end
-        
+        clear o1 o2 new_pair;
     end
     
+    %% Pairs of repetitions for same vs. different context comparisons
+    
+    % pairs of repetitions to use for diff context comparisons
+    % when comparing different contexts/order
+    % we need to consider all possible pairs of repetitions
+    % since order1-rep1 vs. order2-rep2 and order1-rep2 vs. order2-rep1
+    % are both valid
+    % we can optionally also include pairs from the same
+    % repetition, though it is arguably more conservative to not do this
+    diffcontext_rep_pairs = [];
+    for r1 = 1:n_reps
+        if I.samerep
+            second_reps = 1:n_reps;
+        else
+            second_reps = [1:r1-1,r1+1:n_reps];
+        end
+        for r2 = second_reps
+            new_pair = [r1, r2]';
+            diffcontext_rep_pairs = cat(2, diffcontext_rep_pairs, new_pair);
+        end
+    end
+    clear r1 r2 second_reps new_pair;
+    
+    % pairs of repetitions to use for same context comparisons
+    % here we need to consider unique rep pairs obviously
+    % since we have exactly the same segment/context
+    samecontext_rep_pairs = [];
+    for r1 = 1:n_reps
+        for r2 = r1+1:n_reps
+            new_pair = [r1, r2]';
+            samecontext_rep_pairs = cat(2, samecontext_rep_pairs, new_pair);
+        end
+    end
+    clear r1 r2 new_pair;
+        
     %% Segment information
     
     % Key variables:
@@ -376,19 +368,21 @@ if ~exist(MAT_file, 'file') || I.overwrite
         % Each element contains an index that corresponds to a single segment.
         % The location of this index S.segorder.order indicates where this
         % segment occured in the scrambled stimulus.
-        xi = S.segs == L.unique_segs(i) & S.orders == 1;
+        xi = find(S.segs == L.unique_segs(i),1);
         seg_order_indices = reshape(sort(S.segorder(xi).order), n_segs_per_sourcestim, n_sourcestim);
-        assert(length(S.segorder(xi).order)==n_segs_per_scramstim(i));
+        assert(numel(seg_order_indices)==n_segs_per_scramstim(i));
         clear xi;
         
         % for each segment a label indicating the source it came from
         source_labels = repmat(1:n_sourcestim, n_segs_per_sourcestim, 1);
+        assert(numel(source_labels)==n_segs_per_scramstim(i));
         
         % onset of each segment in the original source stimulus
         seg_onsets_in_sourcestim = (0:n_segs_per_sourcestim-1)*seg_dur;
         seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders);
         for l = 1:n_orders
             xi = S.segs == L.unique_segs(i) & S.orders == l;
+            assert(sum(xi)==1);
             for k = 1:n_segs_per_scramstim(i) % loop through all segments
                 seg_index_in_scramstim = find(seg_order_indices(k)==S.segorder(xi).order);
                 seg_start_time_in_scramstim{i}(k,l) = (seg_index_in_scramstim-1)*seg_dur;
@@ -397,26 +391,35 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
         
         % determine which segments are valid for same-duration comparisons
+        % in this case the only reason a segment would be invalid is if 
+        % its source was excluded
         if make_samedur_comparisons
             samedur_valid_segs{i} = ~ismember(source_labels(:), I.excludesources(:));
         end
         
         %% Now find embedded segments
         
-        if make_diffdur_comparisons
+        % only need to do this if making different duration comparisons
+        if make_diffdur_comparisons 
             
             % segment durations to compare with
             longer_seg_dur_inds{i} = i+1:n_seg_durs;
             
             % select particular long segment durations to use for reference
             if ~isnan(I.longsegdurs)
-                inds_to_select = find(eq_tol(L.unique_segs, I.longsegdurs, 'tol', 1e-6));
-                assert(length(inds_to_select)==length(I.longsegdurs));
-                longer_seg_dur_inds{i} = intersect(longer_seg_dur_inds{i}, inds_to_select);
-                clear inds_to_select;
+                longsegs_to_use = find(eq_tol(L.unique_segs, I.longsegdurs, 'tol', 1e-6));
+                assert(length(longsegs_to_use)==length(I.longsegdurs));
+                longer_seg_dur_inds{i} = intersect(longer_seg_dur_inds{i}, longsegs_to_use);
+                clear longsegs_to_use;
             end
             n_longer_seg_durs(i) = length(longer_seg_dur_inds{i});
             
+            % double check they are sorted
+            assert(all(longer_seg_dur_inds{i} == sort(longer_seg_dur_inds{i})));
+            
+            % if there are any longer segs
+            % let's figure out their onset time
+            % and whether they are valid given boundary constraints
             if n_longer_seg_durs(i)>0
                 
                 embedded_seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders, n_longer_seg_durs(i));
@@ -436,35 +439,35 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     % Each element contains an index that corresponds to a single segment.
                     % The location of this index S.segorder.order indicates where this
                     % segment occured in the scrambled stimulus.
-                    xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == 1;
+                    xi = find(S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)),1);
                     longer_seg_order_indices = reshape(sort(S.segorder(xi).order), n_longer_segs_per_sourcestim, n_sourcestim);
-                    assert(length(S.segorder(xi).order)==n_longer_segs_per_scramstim);
+                    assert(numel(longer_seg_order_indices)==n_longer_segs_per_scramstim);
                     clear xi;
                     
                     % loop through segments
                     for k = 1:n_segs_per_scramstim(i)
                         
+                        % if seg should be excluded, we can skip the rest
                         if any(source_labels(k)==I.excludesources)
                             
                             diffdur_valid_segs{i}(k, j) = false;
                             
                         else
                             
-                            % find the start time of the segment in the source stimulus
+                            % find the start time of the shorter segment in the source stimulus
                             % using this, find which longer segment the shorter segment was part of
                             % and the onset time of the short segment in the longer segment
-                            [shortseg_index_in_sourcestim, sourcestim_index] = ind2sub(size(seg_order_indices), k);
-                            y = seg_onsets_in_sourcestim(shortseg_index_in_sourcestim) - longer_seg_onsets_in_sourcestim;
+                            [seg_index_in_sourcestim, sourcestim_index] = ind2sub(size(seg_order_indices), k);
+                            y = seg_onsets_in_sourcestim(seg_index_in_sourcestim) - longer_seg_onsets_in_sourcestim;
                             y(y < -1e-4) = inf;
                             [~, which_longseg] = min(y);
-                            shortseg_onset_relative_to_longseg = y(which_longseg);
+                            seg_onset_relative_to_longer_seg = y(which_longseg);
                             clear y;
                             
                             % find if shorter segment is on the boundary of the longer segment
-                            on_left_boundary = abs(shortseg_onset_relative_to_longseg-0)<1e-4; % eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
-                            on_right_boundary = abs(shortseg_onset_relative_to_longseg-(longer_seg_dur - seg_dur))<1e-4; %eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
+                            on_left_boundary = abs(seg_onset_relative_to_longer_seg-0)<1e-6; % eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
+                            on_right_boundary = abs(seg_onset_relative_to_longer_seg-(longer_seg_dur - seg_dur))<1e-6; %eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
                             on_either_boundary = on_left_boundary || on_right_boundary;
-                            % on_both_boundary = on_left_boundary && on_right_boundary;
                             switch I.boundary
                                 case {'any', 'diffdur'}
                                     diffdur_valid_segs{i}(k, j) = true;
@@ -502,7 +505,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                     error('No matching boundary constraint');
                             end
                             
-                            % if a valid segment based on boundary conditions assign
+                            % if a valid segment based on boundary conditions
+                            % then figure out the onset time relative to the scrambled stimulus
                             if diffdur_valid_segs{i}(k, j)
                                 
                                 % extract the segment responses for the longer segments
@@ -511,15 +515,16 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                     % index of the longer segment int he scrambled stim
                                     xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
                                     assert(sum(xi)==1);
-                                    longseg_index_in_scramstim = find(longer_seg_order_indices(which_longseg, sourcestim_index)==S.segorder(xi).order);
-                                    clear xi
+                                    longer_seg_index_in_scramstim = find(longer_seg_order_indices(which_longseg, sourcestim_index)==S.segorder(xi).order);
+                                    assert(length(longer_seg_index_in_scramstim)==1);
+                                    clear xi;
                                     
                                     % find corresponding onset time
-                                    longseg_start_time = (longseg_index_in_scramstim-1)*longer_seg_dur;
+                                    longer_seg_start_time = (longer_seg_index_in_scramstim-1)*longer_seg_dur;
                                     
                                     % add time to the start of the short segment
-                                    embedded_seg_start_time_in_scramstim{i}(k,l,j) = longseg_start_time + shortseg_onset_relative_to_longseg;
-                                    
+                                    embedded_seg_start_time_in_scramstim{i}(k,l,j) = longer_seg_start_time + seg_onset_relative_to_longer_seg;
+                                    clear longer_seg_start_time;
                                 end
                             end
                         end
@@ -527,22 +532,21 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 end
             end
         end
-        
-        %% optionally exclude segments from particular sources
+                
+        %% double check the excluded sources are absent
         
         if ~isempty(I.excludesources)
-            diffdur_valid_segs{i}(ismember(source_labels(:), I.excludesources(:)),:) = false;
-            samedur_valid_segs{i}(ismember(source_labels(:), I.excludesources(:))) = false;
+            assert(isempty(intersect(source_labels(samedur_valid_segs{i}), I.excludesources)));
             for j = 1:n_longer_seg_durs(i)
                 assert(isempty(intersect(source_labels(diffdur_valid_segs{i}(:,j)), I.excludesources)));
             end
-            assert(isempty(intersect(source_labels(samedur_valid_segs{i}), I.excludesources)));
         end
         
     end
     
     %% Now actually do the analysis using the above info
     
+    fprintf('Correlation computation\n');
     L.same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, n_smps+1, 2);
     L.same_context = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
     L.same_context_err = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
@@ -551,7 +555,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     for q = 1:n_channels % analysis is done separately for every channel to save memory
         
         chan = I.channels(q);
-        fprintf('\n\nchannel %d\n\n', chan); drawnow;
+        fprintf('\n\nchannel %d\n', chan); drawnow;
         
         for i = 1:n_seg_durs
             
@@ -562,7 +566,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 continue;
             end
             
-            fprintf('\n\nSeg duration: %.0f\n\n', L.unique_segs(i)); drawnow;
+            fprintf('Seg duration: %.0f\n', L.unique_segs(i)); drawnow;
             
             % non-embedded segments
             Y_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_reps);
@@ -571,15 +575,17 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 assert(sum(xi)==1);
                 X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
                 for k = 1:n_segs_per_scramstim(i) % loop through all segments
-                    targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
-                    ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
-                    Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
+                    if samedur_valid_segs{i}(k) || any(diffdur_valid_segs{i}(k, :))
+                        targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
+                        ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
+                        Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
+                    end
                 end
                 clear ti targ_times;
             end
             clear X;
             
-            % embedded segments
+            % embedded segments, only needed for different duration comparisons
             if make_diffdur_comparisons
                 Y_embed_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_reps, n_longer_seg_durs(i));
                 for j = 1:n_longer_seg_durs(i)
@@ -609,10 +615,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 %% Segs for the same duration
                 
                 if make_samedur_comparisons
+                    
                     samedur_seg_inds = find(samedur_valid_segs{i});
                     
                     % optionally bootstrap segments
-                    if b > 1 && I.nbstraps>0
+                    if b > 1 && I.nbstraps > 0
                         error('Need to implement bootstrapping');
                     end
                     
@@ -622,7 +629,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                     
                     % optionally permute segment orders
-                    if b > 1 && I.nperms>0
+                    if b > 1 && I.nperms > 0
                         xi = randperm(length(samedur_seg_inds));
                         samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds(xi)];
                         clear xi;
@@ -634,6 +641,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 %% Segs for different duration
                 
                 if make_diffdur_comparisons
+                    
                     diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
                     for j = 1:n_longer_seg_durs(i)
                         
@@ -658,13 +666,16 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     end
                 end
                 
-                %% Same duration
+                %% Compare same duration segments
                 
                 if make_samedur_comparisons
-                    weight = tranweightfn(size(samedur_seg_pairs,1)); % standard error
+                    
+                    % weight by number of segments in the comparison
+                    weight = tranweightfn(size(samedur_seg_pairs,1));
                     X = cell(1,2);
                     for k = 1:size(samedur_order_pairs,2)
                         p_orders = samedur_order_pairs(:,k);
+                        assert(p_orders(1)~=p_orders(2));
                         
                         % select segs to be compared
                         X{1} = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), :);
@@ -672,13 +683,13 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         assert(all(size(X{1})==size(X{2})));
                         
                         % optionally interleave values
-                        if I.interleave
+                        if I.interleave_samedur
                             [X{1}, X{2}] = interleave_oddeven(X{1}, X{2});
                         end
                         
                         % correlate pairs of repetitions
-                        for l = 1:size(samedur_diffcontext_rep_pairs,2)
-                            p_reps = samedur_diffcontext_rep_pairs(:,l);
+                        for l = 1:size(diffcontext_rep_pairs,2)
+                            p_reps = diffcontext_rep_pairs(:,l);
                             C = trancorrfn(simfunc(X{1}(:,:,1,p_reps(1)), X{2}(:,:,1,p_reps(2))));
                             if all(~isnan(C))
                                 L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
@@ -687,8 +698,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         end
                         
                         % reliability of each element
-                        for l = 1:size(samedur_samecontext_rep_pairs,2)
-                            p_reps = samedur_samecontext_rep_pairs(:,l);
+                        for l = 1:size(samecontext_rep_pairs,2)
+                            p_reps = samecontext_rep_pairs(:,l);
                             for m = 1:2
                                 C = trancorrfn(simfunc(X{m}(:,:,1,p_reps(1)), X{m}(:,:,1,p_reps(2))));
                                 if all(~isnan(C))
@@ -707,7 +718,6 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     X = cell(1,2);
                     for j = 1:n_longer_seg_durs(i)
                         weight = tranweightfn(size(diffdur_seg_pairs{j},1)); % standard error
-                        
                         for k = 1:size(diffdur_order_pairs,2)
                             p_orders = diffdur_order_pairs(:,k);
                             
@@ -719,13 +729,13 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             end
                             
                             % optionally interleave values
-                            if I.interleave
+                            if I.interleave_diffdur
                                 [X{1}, X{2}] = interleave_oddeven(X{1}, X{2});
                             end
                             
                             % correlate pairs of repetitions
-                            for l = 1:size(diffdur_diffcontext_rep_pairs,2)
-                                p_reps = diffdur_diffcontext_rep_pairs(:,l);
+                            for l = 1:size(diffcontext_rep_pairs,2)
+                                p_reps = diffcontext_rep_pairs(:,l);
                                 C = trancorrfn(simfunc(X{1}(:,:,1,p_reps(1)), X{2}(:,:,1,p_reps(2))));
                                 if all(~isnan(C))
                                     L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
@@ -734,8 +744,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             end
                             
                             % reliability of each element
-                            for l = 1:size(diffdur_samecontext_rep_pairs,2)
-                                p_reps = diffdur_samecontext_rep_pairs(:,l);
+                            for l = 1:size(samecontext_rep_pairs,2)
+                                p_reps = samecontext_rep_pairs(:,l);
                                 for m = 1:2
                                     C = trancorrfn(simfunc(X{m}(:,:,1,p_reps(1)), X{m}(:,:,1,p_reps(2))));
                                     if all(~isnan(C))
@@ -796,6 +806,7 @@ if I.plot_figure
     
     n_seg_durs = length(L.unique_segs);
     n_channels = length(L.channels);
+    n_smps = size(L.same_context,4);
     
     % create a figure handle if not supplied
     if isempty(I.figh)
@@ -803,27 +814,29 @@ if I.plot_figure
     end
     for q = 1:n_channels
         
+        % channel to plot
         chan = L.channels(q);
         
+        % channel name for saving
         if strcmp(L.chnames{q}, ['ch' num2str(chan)])
             chname = L.chnames{q};
         else
             chname = ['ch' num2str(chan) '-' L.chnames{q}];
         end
         
-        if I.plot_bstraps
-            bstraps_to_plot = 0:I.nbstraps;
+        % samples to plot
+        if I.plot_extra_smps
+            smps_to_plot = 1:n_smps+1;
         else
-            bstraps_to_plot = 0;
+            smps_to_plot = 1;
         end
-        
-        for b = bstraps_to_plot
+        for b = smps_to_plot
             
-            %% Lag results
+            % cross and same context correlations
+            diff_context = L.diff_context(:,:,:,b);
+            same_context = L.same_context(:,:,:,b);
             
-            same_context = L.same_context(:,:,:,b+1);
-            diff_context = L.diff_context(:,:,:,b+1);
-            
+            % plot
             clf(I.figh);
             set(I.figh, 'Position', [100, 100, 900, 900]);
             if isnan(I.plot_range)
@@ -836,7 +849,7 @@ if I.plot_figure
                 end
                 clear ti X;
             else
-                corr_range = [0 1];
+                corr_range = I.plot_range;
             end
             for k = 1:n_seg_durs
                 subplot(4, 2, k);
@@ -849,17 +862,17 @@ if I.plot_figure
                 xlim(I.plot_win * 1000);
                 ylim(corr_range);
                 xlabel('Time Lag (ms)');
-                ylabel('Z-trans Corr');
+                ylabel('Similarity');
                 title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
                 if k == 1
-                    legend('Same', 'Diff', 'Diff (Control)');
+                    legend('Same', 'Cross');
                 end
             end
             fname = [L.figure_directory '/cross-context-corr/' chname ...
                 '-win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2)) ...
                 '-range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
             if b > 0
-                fname = [fname '_bstrap' num2str(b)]; %#ok<AGROW>
+                fname = [fname '_smp' num2str(b)]; %#ok<AGROW>
             end
             export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
             export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
