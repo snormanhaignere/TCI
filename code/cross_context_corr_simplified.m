@@ -33,6 +33,12 @@ I.simfunc = 'corr';
 % (in practice means we must use same segment duration)
 I.boundary = 'none';
 
+% compare segments from the same repetition when context is different?
+I.samerep = false;
+
+% odd-even
+I.oddeven = false;
+
 % window of lags computed
 I.lag_win = [0, 2*max(S.segs(:))/1000];
 
@@ -224,625 +230,548 @@ if ~exist(MAT_file, 'file') || I.overwrite
     n_reps = sum(xi);
     clear xi;
     
-    %% Main analysis
-    
-    L.same_context_smp1 = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.same_context_smp2 = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.same_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.same_context_err = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.diff_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstraps+1);
-    L.n_total_segs = zeros(n_seg_durs,I.nbstraps+1);
-    if I.nperms>0
-        L.same_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
-        L.diff_context_perm = zeros(n_lags, n_seg_durs, I.nperms, n_channels);
+    % average odd and even reps
+    if I.oddeven
+        D_noNaN = cat(4, nanmean(D_noNaN(:,:,:,1:2:end),4), nanmean(D_noNaN(:,:,:,2:2:end),4));
+        n_reps = 2;
     end
-    L.mean_diff_tc = zeros(n_lags, n_seg_durs, n_channels);
-    L.mean_diff_tc_segdur = zeros(n_lags, n_seg_durs, n_seg_durs, n_channels);
-    for q = 1:n_channels
+    
+    % number of additional bootstrapped or permuted samples (not both)
+    assert(~(I.nperms>0 && I.nbstraps>0))
+    n_smps = max([I.nperms, I.nbstraps]);
         
-        chan = I.channels(q);
-        fprintf('\n\nchannel %d\n\n', chan); drawnow;
-        
-        switch I.boundary
-            case 'none'
-                n_short_seg_durs = n_seg_durs;
-            case {'noleft', 'noright', 'right','left'}
-                n_short_seg_durs = n_seg_durs-1;
-            case 'nobound'
-                n_short_seg_durs = n_seg_durs-2;
-            case 'yesbound'
-                n_short_seg_durs = n_seg_durs;
-            otherwise
-                error('No matching boundary constraint');
+    %% Determine pairings for same duration, same context
+    
+    % pairings of orders and repetitions for computing the same-context
+    % correlation between segments of the same duration
+    % columns: order and repetition values
+    % rows: the two elements of each pair
+    % 3rd dim: different pairs
+    % group_index is used to compute two separate
+    % independent estimates of the same context correlation
+    samedur_samecontext_pairs = [];
+    group_index = [];
+    for o = 1:n_orders
+        for r1 = 1:n_reps
+            for r2 = r1+1:n_reps
+                new_pair = [o, r1; o, r2];
+                samedur_samecontext_pairs = cat(3, samedur_samecontext_pairs, new_pair);
+                group_index = cat(1, group_index, mod(o-1,2)+1);
+            end
         end
-        
-        for i = 1:n_short_seg_durs
-            
-            %% Short segment context
-            
-            fprintf('\n\nSeg duration: %.0f\n\n', L.unique_segs(i)); drawnow;
-            
-            % duration and number of segments in the scrambled stimulus
-            % and the original source stimuli
-            shortseg_dur = L.unique_segs(i)/1000;
-            n_shortsegs_per_scramstim = checkint(S.scramstim_dur / shortseg_dur);
-            n_shortsegs_per_sourcestim = checkint(S.sourcestim_dur / shortseg_dur);
-            
-            % onset of each segment in the original source stimulus
-            shortseg_onsets_in_sourcestim = (0:n_shortsegs_per_sourcestim-1)*shortseg_dur;
-            
-            % extract the segment responses for the short segments
-            Y_shortseg = nan(n_shortsegs_per_scramstim, n_lags, n_orders, n_reps);
-            for l = 1:n_orders
-                
-                % stimulus corresponding to a particular segment duration and ordering
-                xi = S.segs == L.unique_segs(i) & S.orders == l;
-                assert(sum(xi)==1);
-                
-                % data for a given stimulus / channel
-                % time x stimulus x channel x repetition
-                % -> time x repetition
-                X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
-                
-                % shortseg_order_indices is n_segs x n_sourcestim matrix
-                % and for each segment gives a number that can be used
-                % to find the location in the scrambled stimulus by comparing the value
-                % with the vector in shortsegs
-                shortsegs = S.segorder(xi);
-                shortseg_order_indices = reshape(sort(shortsegs.order), n_shortsegs_per_sourcestim, n_sourcestim);
-                assert(length(shortsegs.order)==n_shortsegs_per_scramstim);
-                clear xi;
-                for k = 1:n_shortsegs_per_scramstim % loop through all segments
-                    
-                    % find location in scrambled stim
-                    seg_index_in_scramstim = find(shortseg_order_indices(k)==shortsegs.order);
-                    seg_start_time_in_scramstim = (seg_index_in_scramstim-1)*shortseg_dur;
-                    
-                    % extract response
-                    targ_times = L.lag_t' + seg_start_time_in_scramstim;
-                    ti = ge_tol(targ_times, t(1)) & le_tol(targ_times, t(end));
-                    Y_shortseg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
-                    clear seg_index_in_scramstim seg_start_time_in_scramstim;
+    end
+    
+    %% Same duration, different context
+    
+    % pairings of orders and repetitions for computing the different-context
+    % correlation between segments of the same duration
+    % segments with thee same duration
+    % columns: order and repetition values
+    % rows: the two elements of each pair
+    % 3rd dim: different pairs
+    samedur_diffcontext_pairs = [];
+    for o1 = 1:n_orders
+        for o2 = o1+1:n_orders
+            for r1 = 1:n_reps
+                if I.samerep
+                    second_reps = 1:n_reps;
+                else
+                    second_reps = [1:r1-1,r1+1:n_reps];
                 end
-                clear ti;
-                clear X;
-            end
-            
-            %% Longer (or equal) segment responses
-            
-            % now find responses for corresponding segments in the longer (or equal duration) stimuli
-            % boundary constraint controls which segment durations we can use
-            switch I.boundary
-                case 'none'
-                    long_seg_dur_inds = i:n_seg_durs;
-                case {'noleft', 'noright', 'right','left'}
-                    long_seg_dur_inds = i+1:n_seg_durs;
-                case 'nobound'
-                    long_seg_dur_inds = i+2:n_seg_durs;
-                case 'yesbound'
-                    long_seg_dur_inds = i;
-                otherwise
-                    error('No matching boundary constraint');
-            end
-            if ~isnan(I.longsegdurs)
-                inds_to_select = find(eq_tol(L.unique_segs, I.longsegdurs, 'tol', 1e-6));
-                assert(length(inds_to_select)==length(I.longsegdurs));
-                long_seg_dur_inds = intersect(long_seg_dur_inds, inds_to_select);
-                clear inds_to_select;
-            end
-            
-            %%
-            n_long_seg_durs = length(long_seg_dur_inds);
-            Y_longsegs = nan(n_shortsegs_per_scramstim, n_lags, n_orders, n_long_seg_durs, n_reps);
-            valid_segs = false(n_shortsegs_per_scramstim, n_orders, n_long_seg_durs);
-            for j = 1:n_long_seg_durs
-                
-                fprintf('Responses for seg dur %.0f ms\n', L.unique_segs(long_seg_dur_inds(j))); drawnow;
-                
-                % duration and number of segments in the scrambled stim
-                % and the original source stimuli
-                longseg_dur = L.unique_segs(long_seg_dur_inds(j))/1000;
-                n_longsegs_per_scramstim = checkint(S.scramstim_dur / longseg_dur);
-                n_longsegs_per_sourcestim = checkint(S.sourcestim_dur / longseg_dur);
-                
-                % onset of each segment in the original source stimulus
-                longseg_onsets_in_sourcestim = (0:n_longsegs_per_sourcestim-1)*longseg_dur;
-                
-                % extract the segment responses for the longer segments
-                for l = 1:n_orders
-                    
-                    % pick out stimulus corresponding to a particular
-                    % segment duration and order
-                    xi = S.segs == L.unique_segs(long_seg_dur_inds(j)) & S.orders == l;
-                    
-                    % data for this stimulus/channel
-                    % time x stim x channel x repetition
-                    % -> time x repetition
-                    X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
-                    
-                    % longsegs_order_indices is n_segs x n_sourcestim
-                    % and for each segment gives a number that can be used
-                    % to find the location in the scrambled stim by comparing the value
-                    % with the vector in longsegs.order
-                    longsegs = S.segorder(xi);
-                    longsegs_order_indices = reshape(sort(longsegs.order), n_longsegs_per_sourcestim, n_sourcestim);
-                    assert(length(longsegs.order)==n_longsegs_per_scramstim);
-                    clear xi;
-                    
-                    % loop through segments
-                    for k = 1:n_shortsegs_per_scramstim
-                        
-                        % find the start time of the segment in the source stimulus
-                        % using this, find which longer segment the shorter segment was part of
-                        % and the onset time of the short segment in the longer segment
-                        [shortseg_index_in_sourcestim, sourcestim_index] = ind2sub(size(shortseg_order_indices), k);
-                        y = shortseg_onsets_in_sourcestim(shortseg_index_in_sourcestim) - longseg_onsets_in_sourcestim;
-                        y(y < -1e-4) = inf;
-                        [~, which_longseg] = min(y);
-                        shortseg_onset_relative_to_longseg = y(which_longseg);
-                        clear y;
-                        
-                        % find if shorter segment is on the boundary of the longer segment
-                        on_left_boundary = abs(shortseg_onset_relative_to_longseg-0)<1e-4; % eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
-                        on_right_boundary = abs(shortseg_onset_relative_to_longseg-(longseg_dur - shortseg_dur))<1e-4; %eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
-                        on_either_boundary = on_left_boundary || on_right_boundary;
-                        on_both_boundary = on_left_boundary && on_right_boundary;
-                        switch I.boundary
-                            case 'none'
-                                valid_segs(k, l, j) = true;
-                            case 'noleft'
-                                if ~on_left_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            case 'noright'
-                                if ~on_right_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            case 'right'
-                                if on_right_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            case 'left'
-                                if on_left_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            case 'nobound'
-                                if ~on_either_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            case 'yesbound'
-                                if on_both_boundary
-                                    valid_segs(k, l, j) = true;
-                                else
-                                    valid_segs(k, l, j) = false;
-                                end
-                            otherwise
-                                error('No matching boundary constraint');
-                        end
-                        
-                        % if a valid segment based on boundary conditions assign
-                        if valid_segs(k, l, j)
-                            
-                            % index of the longer segment int he scrambled stim
-                            longseg_index_in_scramstim = find(longsegs_order_indices(which_longseg, sourcestim_index)==longsegs.order);
-                            
-                            % find corresponding onset time
-                            longseg_start_time = (longseg_index_in_scramstim-1)*longseg_dur;
-                            
-                            % add time to the start of the short segment
-                            shortseg_start_time = longseg_start_time + shortseg_onset_relative_to_longseg;
-                            
-                            % pick out response
-                            targ_times = L.lag_t' + shortseg_start_time;
-                            ti = targ_times>(t(1)-1e-6) & targ_times < (targ_times+1e-6); % ge_tol(targ_times, t(1)) & le_tol(targ_times, t(end));
-                            Y_longsegs(k, ti, l, j, :) = interp1( t, X, targ_times(ti), 'linear' );
-                        end
-                    end
-                    clear ti targ_times;
-                    clear X;
+                for r2 = second_reps
+                    new_pair = [o1, r1; o2, r2];
+                    samedur_diffcontext_pairs = cat(3, samedur_diffcontext_pairs, new_pair);
                 end
+                clear second_reps;
             end
-            
-            % check natcontext does not depend on order and then remove
-            X = bsxfun(@minus, valid_segs(:,1,:), valid_segs);
-            assert(all(X(:)==0));
-            clear X;
-            valid_segs = squeeze_dims(valid_segs(:,1,:),2);
-            
-            % exclude particular central segments
-            source_labels = repmat(1:n_sourcestim, n_shortsegs_per_sourcestim, 1);
-            if ~isempty(I.excludesources)
-                valid_segs(ismember(source_labels(:), I.excludesources(:)),:) = false;
-            end
-            
-            
-            %% setup
-            
-            same_context_weight_twogroup = [0,0];
-            diff_context_weight = 0;
-            
-            
-            %% Same duration, same context
-            
-            n_orders = 2;
-            n_reps = 2;
-            
-            % pairings of orders and repetitions for computing the same-context
-            % correlation between segments of the same duration
-            % columns: order and repetition values
-            % rows: the two elements of each pair
-            % 3rd dim: different pairs
-            % group_index is used to compute two separate
-            % independent estimates of the same context correlation
-            samedur_samecontext_pairs = [];
-            group_index = [];
-            for o = 1:n_orders
-                for r1 = 1:n_reps
-                    for r2 = r1+1:n_reps
-                        new_pair = [o, r1; o, r2];
-                        samedur_samecontext_pairs = cat(3, samedur_samecontext_pairs, new_pair);
+        end
+    end
+    
+    %% Different duration, same context
+    
+    % pairings of orders and repetitions for computing the same-context
+    % correlation between segments of different durations
+    % columns: duration, order, repetition, and duration (short vs. long) values
+    % rows: the two elements of each pair
+    % 3rd dim: different pairs
+    % group_index is used to compute two separate
+    % independent estimates of the same context correlation
+    diffdur_samecontext_pairs = [];
+    group_index = [];
+    for d = 1:2
+        for o = 1:n_orders
+            for r1 = 1:n_reps
+                for r2 = r1+1:n_reps
+                    new_pair = [d, o, r1; d, o, r2];
+                    diffdur_samecontext_pairs = cat(3, diffdur_samecontext_pairs, new_pair);
+                    if n_orders < 2
+                        group_index = cat(1, group_index, mod(d-1,2)+1);
+                    else
                         group_index = cat(1, group_index, mod(o-1,2)+1);
                     end
                 end
             end
-                        
-            clc;
-            samedur_samecontext_pairs
-            group_index
-            
-            %% Compute the correlation values
-            
-            for k = 1:size(samedur_samecontext_pairs,3)
-                p_orders = samedur_samecontext_pairs(:,1,k);
-                p_reps = samedur_samecontext_pairs(:,2,k);
-                g = group_index(k);
-                
-                X1 = Y_shortseg_touse(samedur_segs1, :, p_orders(1), p_reps(1));
-                X2 = Y_shortseg_touse(samedur_segs2, :, p_orders(2), p_reps(2));
-                
-                C = trancorrfn(simfunc(X1, X2));
-                if all(~isnan(C))
-                    L.same_context_twogroup(:,i,q,b+1,g) = L.same_context_twogroup(:,i,q,b+1,g) + C' * weight;
-                    same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
-                end
-            end
-            
-            
-            %% Same duration, different context
-            
-            % pairings of orders and repetitions for computing the different-context
-            % correlation between segments of the same duration
-            % segments with thee same duration
-            % columns: order and repetition values
-            % rows: the two elements of each pair
-            % 3rd dim: different pairs
-            I.alldiffcorrs = true;
-            samedur_diffcontext_pairs = [];
-            for o1 = 1:n_orders
-                for o2 = o1+1:n_orders
-                    for r1 = 1:n_reps
-                        if I.alldiffcorrs
-                            second_reps = 1:n_reps;
-                        else
-                            second_reps = [1:r1-1,r1+1:n_reps];
-                        end
-                        for r2 = second_reps
-                            new_pair = [o1, r1; o2, r2];
-                            samedur_diffcontext_pairs = cat(3, samedur_diffcontext_pairs, new_pair);
-                        end
-                        clear second_reps;
-                    end
-                end
-            end
-                        
-            clc;
-            samedur_diffcontext_pairs
-            
-            %% Compute the correlation values
-            
-            for k = 1:size(samedur_diffcontext_pairs,3)
-                p_orders = samedur_diffcontext_pairs(:,1,k);
-                p_reps = samedur_diffcontext_pairs(:,2,k);
-                
-                X1 = Y_shortseg_touse(samedur_segs1, :, p_orders(1), p_reps(1));
-                X2 = Y_shortseg_touse(samedur_segs2, :, p_orders(2), p_reps(2));
-                
-                C = trancorrfn(simfunc(X1, X2));
-                if all(~isnan(C))
-                    L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1) + C' * weight;
-                    diff_context_weight = diff_context_weight + weight;
-                end
-            end
-            
-            %% Different duration, same context
-                        
-            % pairings of orders and repetitions for computing the same-context
-            % correlation between segments of different durations
-            % columns: duration, order, repetition, and duration (short vs. long) values
-            % rows: the two elements of each pair
-            % 3rd dim: different pairs
-            % group_index is used to compute two separate
-            % independent estimates of the same context correlation
-            diffdur_samecontext_pairs = [];
-            group_index = [];
-            for d = 1:2
-                for o = 1:n_orders
-                    for r1 = 1:n_reps
-                        for r2 = r1+1:n_reps
-                            new_pair = [d, o, r1; d, o, r2];
-                            diffdur_samecontext_pairs = cat(3, diffdur_samecontext_pairs, new_pair);
-                            if n_orders < 2
-                                group_index = cat(1, group_index, mod(d-1,2)+1);
-                            else
-                                group_index = cat(1, group_index, mod(o-1,2)+1);
-                            end
-                        end
-                    end
-                end
-            end
-                        
-            clc;
-            diffdur_samecontext_pairs
-            group_index
-            
-            %% Compute the correlation values
-            
-            for j = 1:n_long_seg_durs
-                for k = 1:size(diffdur_samecontext_pairs,3)
-                    assert(all(diffdur_samecontext_pairs(:,1,k)==[1,2]'));
-                    p_orders = diffdur_samecontext_pairs(:,2,k);
-                    p_reps = diffdur_samecontext_pairs(:,3,k);
-                    g = group_index(k);
-                    
-                    X1 = Y_shortseg_touse(diffdur_segs1(:,j), :, p_orders(1), p_reps(1));
-                    X2 = Y_longseg_touse(diffdur_segs2(:,j), :, p_orders(2), j, p_reps(2));
-                    
-                    C = trancorrfn(simfunc(X1, X2));
-                    if all(~isnan(C))
-                        L.same_context_twogroup(:,i,q,b+1,g) = L.same_context_twogroup(:,i,q,b+1,g) + C' * weight;
-                        same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
-                    end
-                end
-            end
-            
-            %% Different duration, different context
-            
-            % pairings of orders and repetitions for computing the different-context
-            % correlation between segments of different duration
-            % segments with thee same duration
-            % columns: duration, order and repetition values
-            % rows: the two elements of each pair
-            % 3rd dim: different pairs
-            I.alldiffcorrs = true;
-            diffdur_diffcontext_pairs = [];
-            for o1 = 1:n_orders
-                for o2 = 1:n_orders
-                    for r1 = 1:n_reps
-                        if I.alldiffcorrs
-                            second_reps = 1:n_reps;
-                        else
-                            second_reps = [1:r1-1,r1+1:n_reps];
-                        end
-                        for r2 = second_reps
-                            new_pair = [1, o1, r1; 2, o2, r2];
-                            diffdur_diffcontext_pairs = cat(3, diffdur_diffcontext_pairs, new_pair);
-                        end
-                        clear second_reps;
-                    end
-                end
-            end
-            
-            clc;
-            diffdur_diffcontext_pairs
-            
-            %% Compute the correlation values
-            
-            for j = 1:n_long_seg_durs
-                for k = 1:size(diffdur_diffcontext_pairs,3)
-                    assert(all(diffdur_diffcontext_pairs(:,1,k)==[1,2]'));
-                    p_orders = diffdur_diffcontext_pairs(:,2,k);
-                    p_reps = diffdur_diffcontext_pairs(:,3,k);
-                    
-                    X1 = Y_shortseg_touse(diffdur_segs1(:,j), :, p_orders(1), p_reps(1));
-                    X2 = Y_longseg_touse(diffdur_segs2(:,j), :, p_orders(2), j, p_reps(2));
-                    
-                    C = trancorrfn(simfunc(X1, X2));
-                    if all(~isnan(C))
-                        L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1) + C' * weight;
-                        diff_context_weight = diff_context_weight + weight;
-                    end
-                end
-            end
-            
-            %% Weighted correlation
-                        
-            for b = 0:I.nbstraps % b = 0, no bootstrapping
-                
-                if b > 0
-                    fprintf('Bootstrap %d\n', b); drawnow;
-                end
-                
-                % bootstrap across sources
-                if b > 0 && strcmp(I.bstraptype, 'sources')
-                    all_seg_inds = reshape((1:n_shortsegs_per_scramstim), n_shortsegs_per_sourcestim, n_sourcestim);
-                    source_samples = randi(n_sourcestim, [1, n_sourcestim]);
-                    seg_inds_touse = all_seg_inds(:, source_samples);
-                    Y_shortseg_touse = Y_shortseg(seg_inds_touse(:), :, :, :);
-                    Y_longsegs_touse = Y_longsegs(seg_inds_touse(:), :, :, :, :);
-                    valid_segs_touse = valid_segs(seg_inds_touse(:),:);
-                    clear all_seg_inds source_samples seg_inds_touse;
+        end
+    end
+    
+    %% Different duration, different context
+    
+    % pairings of orders and repetitions for computing the different-context
+    % correlation between segments of different duration
+    % segments with thee same duration
+    % columns: duration, order and repetition values
+    % rows: the two elements of each pair
+    % 3rd dim: different pairs
+    diffdur_diffcontext_pairs = [];
+    for o1 = 1:n_orders
+        for o2 = 1:n_orders
+            for r1 = 1:n_reps
+                if I.samerep
+                    second_reps = 1:n_reps;
                 else
-                    Y_shortseg_touse = Y_shortseg;
-                    Y_longsegs_touse = Y_longsegs;
-                    valid_segs_touse = valid_segs;
+                    second_reps = [1:r1-1,r1+1:n_reps];
                 end
+                for r2 = second_reps
+                    new_pair = [1, o1, r1; 2, o2, r2];
+                    diffdur_diffcontext_pairs = cat(3, diffdur_diffcontext_pairs, new_pair);
+                end
+                clear second_reps;
+            end
+        end
+    end
+    
+    %% Segment information
+    
+    % Key variables:
+    %
+    % seg_start_time_in_scramstim
+    % {segment duration} x seg x order
+    % indicates the onset time for each segment in a scrambled stimulus
+    %
+    % embedded_seg_start_time_in_scramstim:
+    % {segment duration} x seg x order x long seg duration
+    % indicates the onset time of a segment embedded in a longer segment
+    % segment in a scrambled stimulus
+    %
+    % samedur_valid_segs
+    % {segment duration} x seg
+    % indicates whether a segment should be used same-duration comparisons
+    %
+    % diffdur_valid_segs
+    % {segment duration} x seg x long seg duration
+    % indicates whether a segment should be used different-duration comparisons
+    
+    n_segs_per_scramstim = nan(1, n_seg_durs);
+    seg_start_time_in_scramstim = cell(1, n_seg_durs);
+    embedded_seg_start_time_in_scramstim = cell(1, n_seg_durs);
+    samedur_valid_segs = cell(1, n_seg_durs);
+    diffdur_valid_segs = cell(1, n_seg_durs);
+    longer_seg_dur_inds = cell(1, n_seg_durs);
+    n_longer_seg_durs = nan(1, n_seg_durs);
+    for i = 1:n_seg_durs
                 
-                % correlation for same vs. different order
-                weight_sum_diff_context = 0;
-                weight_sum_same_context = 0;
-                weight_sum_diff_context_segdur = zeros(1, n_long_seg_durs);
-                for j = 1:n_long_seg_durs
+        % duration and number of segments in the scrambled stimulus
+        % and the original source stimuli
+        seg_dur = L.unique_segs(i)/1000;
+        n_segs_per_scramstim(i) = checkint(S.scramstim_dur / seg_dur);
+        n_segs_per_sourcestim = checkint(S.sourcestim_dur / seg_dur);
+        
+        % shortseg_order_indices is n_segs_per_source_stim x n_sourcestim matrix
+        % Each element contains an index that corresponds to a single segment.
+        % The location of this index S.segorder.order indicates where this
+        % segment occured in the scrambled stimulus.
+        xi = S.segs == L.unique_segs(i) & S.orders == 1;
+        seg_order_indices = reshape(sort(S.segorder(xi).order), n_segs_per_sourcestim, n_sourcestim);
+        assert(length(S.segorder(xi).order)==n_segs_per_scramstim(i));
+        clear xi;
+        
+        % onset of each segment in the original source stimulus
+        seg_onsets_in_sourcestim = (0:n_segs_per_sourcestim-1)*seg_dur;
+        seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders);
+        for l = 1:n_orders
+            xi = S.segs == L.unique_segs(i) & S.orders == l;
+            for k = 1:n_segs_per_scramstim(i) % loop through all segments
+                seg_index_in_scramstim = find(seg_order_indices(k)==S.segorder(xi).order);
+                seg_start_time_in_scramstim{i}(k,l) = (seg_index_in_scramstim-1)*seg_dur;
+            end
+            clear xi;
+        end
+        
+        % determine which segments are valid for same-duration comparisons
+        switch I.boundary
+            case {'none', 'yesbound', 'left', 'right'}
+                samedur_valid_segs{i} = true(n_segs_per_scramstim(i),1);
+            case {'nobound', 'noleft', 'noright'}
+                samedur_valid_segs{i} = false(n_segs_per_scramstim(i),1);
+            otherwise
+                error('No matching boundary constraint');
+        end
+        
+        %% Now find embedded segments
+        
+        % now find responses for corresponding segments in the longer (or equal duration) stimuli
+        % boundary constraint controls which segment durations we can use
+        if strcmp(I.boundary, 'yesbound')
+            longer_seg_dur_inds{i} = [];
+        else
+            longer_seg_dur_inds{i} = i+1:n_seg_durs;
+        end
+        
+        % select particular long segment durations to use for reference
+        if ~isnan(I.longsegdurs)
+            inds_to_select = find(eq_tol(L.unique_segs, I.longsegdurs, 'tol', 1e-6));
+            assert(length(inds_to_select)==length(I.longsegdurs));
+            longer_seg_dur_inds{i} = intersect(longer_seg_dur_inds{i}, inds_to_select);
+            clear inds_to_select;
+        end
+        n_longer_seg_durs(i) = length(longer_seg_dur_inds{i});
+        
+        if n_longer_seg_durs(i)>0
+            
+            embedded_seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders, n_longer_seg_durs(i));
+            diffdur_valid_segs{i} = false(n_segs_per_scramstim(i), n_longer_seg_durs(i));
+            for j = 1:n_longer_seg_durs(i)
+                
+                % duration and number of segments in the scrambled stim
+                % and the original source stimuli
+                longer_seg_dur = L.unique_segs(longer_seg_dur_inds{i}(j))/1000;
+                n_longer_segs_per_scramstim = checkint(S.scramstim_dur / longer_seg_dur);
+                n_longer_segs_per_sourcestim = checkint(S.sourcestim_dur / longer_seg_dur);
+                
+                % onset of each segment in the original source stimulus
+                longer_seg_onsets_in_sourcestim = (0:n_longer_segs_per_sourcestim-1)*longer_seg_dur;
+                
+                % longer_seg_order_indices is n_segs_per_source_stim x n_sourcestim matrix
+                % Each element contains an index that corresponds to a single segment.
+                % The location of this index S.segorder.order indicates where this
+                % segment occured in the scrambled stimulus.
+                xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == 1;
+                longer_seg_order_indices = reshape(sort(S.segorder(xi).order), n_longer_segs_per_sourcestim, n_sourcestim);
+                assert(length(S.segorder(xi).order)==n_longer_segs_per_scramstim);
+                clear xi;
+                
+                % loop through segments
+                for k = 1:n_segs_per_scramstim(i)
                     
-                    if b == 0
-                        fprintf('Correlations for seg dur %.0f ms\n', L.unique_segs(long_seg_dur_inds(j))); drawnow;
-                    end
+                    % find the start time of the segment in the source stimulus
+                    % using this, find which longer segment the shorter segment was part of
+                    % and the onset time of the short segment in the longer segment
+                    [shortseg_index_in_sourcestim, sourcestim_index] = ind2sub(size(seg_order_indices), k);
+                    y = seg_onsets_in_sourcestim(shortseg_index_in_sourcestim) - longer_seg_onsets_in_sourcestim;
+                    y(y < -1e-4) = inf;
+                    [~, which_longseg] = min(y);
+                    shortseg_onset_relative_to_longseg = y(which_longseg);
+                    clear y;
                     
-                    % valid segments
-                    valid_seg_single_segdur_nobstrap = find(valid_segs_touse(:,j));
-                    n_valid_segs = length(valid_seg_single_segdur_nobstrap);
-                    weight = tranweightfn(n_valid_segs); % standard error
-
-                    % bootstrap across valid segments
-                    if b > 0 && strcmp(I.bstraptype, 'segs')
-                        seg_smps = randi(n_valid_segs, [n_valid_segs, 1]);
-                        valid_seg_single_segdur = valid_seg_single_segdur_nobstrap(seg_smps);
-                        clear seg_smps;
-                    else
-                        valid_seg_single_segdur = valid_seg_single_segdur_nobstrap;
-                    end
-                    
-                    if q == 1
-                        try
-                            L.n_total_segs(i,b+1) = L.n_total_segs(i,b+1) + n_valid_segs;
-                        catch
-                            keyboard
-                        end
-                    end
-                    for k = 1:n_reps
-                        for l = (k+1):n_reps
-                            for m = 1:n_orders
-                                
-                                short_rep1 = Y_shortseg_touse(valid_seg_single_segdur, :, m, k);
-                                short_rep2 = Y_shortseg_touse(valid_seg_single_segdur, :, m, l);
-                                long_rep1 = Y_longsegs_touse(valid_seg_single_segdur, :, m, j, k);
-                                long_rep2 = Y_longsegs_touse(valid_seg_single_segdur, :, m, j, l);
-                                
-                                if I.simoffset
-                                    offset = (mean(short_rep1(:)) + mean(short_rep2(:)));
-                                    short_rep1 = short_rep1 + offset;
-                                    short_rep2 = short_rep2 + offset;
-                                end
-                                
-                                if long_seg_dur_inds(j)==i
-                                    orders_to_use = setdiff(1:n_orders, m);
-                                else
-                                    orders_to_use = 1:n_orders;
-                                end
-                                
-                                % only permute across non-bootstrapped samples
-                                if b > 0
-                                    nperms = I.nperms;
-                                else
-                                    nperms = 0;
-                                end
-                                for p = 0:nperms
-                                    
-                                    if p > 1
-                                        short_rep1 = short_rep1(randperm(n_valid_segs),:);
-                                        short_rep2 = short_rep2(randperm(n_valid_segs),:);
-                                        long_rep1 = long_rep1(randperm(n_valid_segs),:);
-                                        long_rep2 = long_rep2(randperm(n_valid_segs),:);
-                                    end
-                                    
-                                    % note: only doing test-retest here for order m, but will hit all orders
-                                    if I.interleave
-                                        X1 = [short_rep1(1:2:end,:); long_rep2(2:2:end,:)];
-                                        X2 = [short_rep2(1:2:end,:); long_rep1(2:2:end,:)];
-                                        Y1 = [long_rep2(1:2:end,:); short_rep1(2:2:end,:)];
-                                        Y2 = [long_rep1(1:2:end,:); short_rep2(2:2:end,:)];
-                                        C1 = trancorrfn(simfunc(X1, X2));
-                                        C2 = trancorrfn(simfunc(Y1, Y2));
-                                        clear X1 X2 Y1 Y2;
-                                    else
-                                        C1 = trancorrfn(simfunc(short_rep1, short_rep2));
-                                        C2 = trancorrfn(simfunc(long_rep1, long_rep2));
-                                    end
-                                    if all(~isnan(C1)) && all(~isnan(C2))
-                                        if p > 0
-                                            assert(b==0);
-                                            L.same_context_perm(:,i,p,q) = L.same_context_perm(:,i,p,q) + C' * weight;
-                                        else
-                                            L.same_context_smp1(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1) + C1' * weight;
-                                            L.same_context_smp2(:,i,q,b+1) = L.same_context_smp2(:,i,q,b+1) + C2' * weight;
-                                            weight_sum_same_context = weight_sum_same_context + weight;
-                                        end
-                                    end
-                                    clear C1 C2;
-                                    
-                                    for n = orders_to_use
-                                        
-                                        long_rep1 = Y_longsegs_touse(valid_seg_single_segdur, :, n, j, k);
-                                        long_rep2 = Y_longsegs_touse(valid_seg_single_segdur, :, n, j, l);
-                                        if p > 0
-                                            long_rep1 = long_rep1(randperm(n_valid_segs),:);
-                                            long_rep2 = long_rep2(randperm(n_valid_segs),:);
-                                        end
-                                        
-                                        if I.interleave
-                                            X1 = [short_rep1(1:2:end,:); long_rep2(2:2:end,:)];
-                                            X2 = [long_rep2(1:2:end,:); short_rep1(2:2:end,:)];
-                                            Y1 = [short_rep2(1:2:end,:); long_rep1(2:2:end,:)];
-                                            Y2 = [long_rep1(1:2:end,:); short_rep2(2:2:end,:)];
-                                            C = trancorrfn(simfunc(X1, X2))/2 + trancorrfn(simfunc(Y1, Y2))/2;
-                                            clear X1 X2 Y1 Y2;
-                                        else
-                                            C = trancorrfn(simfunc(short_rep1, long_rep2))/2 + trancorrfn(simfunc(short_rep2, long_rep1))/2;
-                                        end
-                                        if all(~isnan(C))
-                                            if p > 0
-                                                assert(b==0);
-                                                L.diff_context_perm(:,i,p,q) = L.diff_context(:,i,p,q) + C' * weight;
-                                            else
-                                                L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1) + C' * weight;
-                                            end
-                                            if p == 0
-                                                weight_sum_diff_context = weight_sum_diff_context + weight;
-                                                weight_sum_diff_context_segdur(j) = weight_sum_diff_context_segdur(j) + weight;
-                                            end
-                                            
-                                            if p == 0 && b == 0
-                                                y = mean(Y_longsegs_touse(valid_seg_single_segdur, :, n, j, l) - Y_shortseg_touse(valid_seg_single_segdur, :, m, k),1);
-                                                y = squeeze_dims(y,1);
-                                                L.mean_diff_tc_segdur(:,i,long_seg_dur_inds(j),q) = L.mean_diff_tc_segdur(:,i,long_seg_dur_inds(j),q) + y * weight;
-                                                L.mean_diff_tc(:,i,q) = L.mean_diff_tc(:,i,q) + y * weight;
-                                            end
-                                        end
-                                        clear C;
-                                    end
-                                end
+                    % find if shorter segment is on the boundary of the longer segment
+                    on_left_boundary = abs(shortseg_onset_relative_to_longseg-0)<1e-4; % eq_tol(shortseg_onset_relative_to_longseg, 0, 'tol', 1e-4);
+                    on_right_boundary = abs(shortseg_onset_relative_to_longseg-(longer_seg_dur - seg_dur))<1e-4; %eq_tol(shortseg_onset_relative_to_longseg, longseg_dur - shortseg_dur, 'tol', 1e-4);
+                    on_either_boundary = on_left_boundary || on_right_boundary;
+                    on_both_boundary = on_left_boundary && on_right_boundary;
+                    switch I.boundary
+                        case 'none'
+                            diffdur_valid_segs{i}(k, j) = true;
+                        case 'noleft'
+                            if ~on_left_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
                             end
+                        case 'noright'
+                            if ~on_right_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
+                            end
+                        case 'right'
+                            if on_right_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
+                            end
+                        case 'left'
+                            if on_left_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
+                            end
+                        case 'nobound'
+                            if ~on_either_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
+                            end
+                        case 'yesbound'
+                            if on_both_boundary
+                                diffdur_valid_segs{i}(k, j) = true;
+                            else
+                                diffdur_valid_segs{i}(k, j) = false;
+                            end
+                        otherwise
+                            error('No matching boundary constraint');
+                    end
+                    
+                    % if a valid segment based on boundary conditions assign
+                    if diffdur_valid_segs{i}(k, j)                        
+                        
+                        % extract the segment responses for the longer segments
+                        for l = 1:n_orders
+                            
+                            % index of the longer segment int he scrambled stim
+                            xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
+                            assert(sum(xi)==1);
+                            longseg_index_in_scramstim = find(longer_seg_order_indices(which_longseg, sourcestim_index)==S.segorder(xi).order);
+                            clear xi
+                            
+                            % find corresponding onset time
+                            longseg_start_time = (longseg_index_in_scramstim-1)*longer_seg_dur;
+                            
+                            % add time to the start of the short segment
+                            embedded_seg_start_time_in_scramstim{i}(k,l,j) = longseg_start_time + shortseg_onset_relative_to_longseg;
+                            
                         end
-                    end
-                    if b == 0
-                        L.mean_diff_tc_segdur(:,i,long_seg_dur_inds(j),q) = L.mean_diff_tc_segdur(:,i,long_seg_dur_inds(j),q) / weight_sum_diff_context_segdur(j);
-                    end
-                end
-                
-                L.same_context_smp1(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1)/weight_sum_same_context;
-                L.same_context_smp2(:,i,q,b+1) = L.same_context_smp2(:,i,q,b+1)/weight_sum_same_context;
-                L.same_context(:,i,q,b+1) = L.same_context_smp1(:,i,q,b+1)/2 + L.same_context_smp2(:,i,q,b+1)/2;
-                L.same_context_err(:,i,q,b+1) = (L.same_context_smp1(:,i,q,b+1)/2 - L.same_context_smp2(:,i,q,b+1)/2).^2;
-                L.diff_context(:,i,q,b+1) = L.diff_context(:,i,q,b+1)/weight_sum_diff_context;
-                
-                if b == 0
-                    L.mean_diff_tc(:,i,q) = L.mean_diff_tc(:,i,q)/weight_sum_diff_context;
-                    if I.nperms>0
-                        L.same_context_perm(:,i,:,q) = L.same_context_perm(:,i,:,q)/weight_sum_same_context;
-                        L.diff_context_perm(:,i,:,q) = L.diff_context_perm(:,i,:,q)/weight_sum_diff_context;
                     end
                 end
             end
         end
+                
+        %% optionally exclude segments from particular sources
+        
+        source_labels = repmat(1:n_sourcestim, n_segs_per_sourcestim, 1);
+        if ~isempty(I.excludesources)
+            diffdur_valid_segs{i}(ismember(source_labels(:), I.excludesources(:)),:) = false;
+            samedur_valid_segs{i}(ismember(source_labels(:), I.excludesources(:))) = false;
+            for j = 1:n_longer_seg_durs(i)
+                assert(isempty(intersect(source_labels(diffdur_valid_segs{i}(:,j)), I.excludesources)));
+            end
+            assert(isempty(intersect(source_labels(samedur_valid_segs{i}), I.excludesources)));
+        end
+        
+    end
+    
+    
+    %% Now actually do the analysis using the above info
+    
+    L.same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, n_smps+1, 2);
+    L.same_context = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
+    L.same_context_err = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
+    L.diff_context = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
+    L.n_total_segs = zeros(n_seg_durs,n_smps+1);
+    for q = 1:n_channels % analysis is done separately for every channel to save memory
+        
+        chan = I.channels(q);
+        fprintf('\n\nchannel %d\n\n', chan); drawnow;
+        
+        for i = 1:n_seg_durs
+            
+            %% Get the segments
+            
+            % skip this segment duration if there are no valid segment comparisons
+            if all(~diffdur_valid_segs{i}(:)) && all(~samedur_valid_segs{i}(:))
+                continue;
+            end
+                        
+            fprintf('\n\nSeg duration: %.0f\n\n', L.unique_segs(i)); drawnow;
+            
+            % non-embedded segments
+            Y_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_reps);
+            for l = 1:n_orders
+                xi = S.segs == L.unique_segs(i) & S.orders == l;
+                assert(sum(xi)==1);
+                X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
+                for k = 1:n_segs_per_scramstim(i) % loop through all segments
+                    targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
+                    ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
+                    Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
+                end
+                clear ti targ_times;
+            end
+            clear X;
+            
+            % embedded segments
+            Y_embed_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_longer_seg_durs(i), n_reps);
+            for j = 1:n_longer_seg_durs(i)
+                for l = 1:n_orders
+                    xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
+                    assert(sum(xi)==1);
+                    X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
+                    for k = 1:n_segs_per_scramstim(i)
+                        if diffdur_valid_segs{i}(k, j)
+                            targ_times = L.lag_t' + embedded_seg_start_time_in_scramstim{i}(k,l,j);
+                            ti = targ_times>(t(1)-1e-6) & targ_times < (targ_times+1e-6);
+                            Y_embed_seg(k, ti, l, j, :) = interp1( t, X, targ_times(ti), 'linear' );
+                        end
+                        clear ti targ_times;
+                    end
+                    clear X;
+                end
+            end
+                                                
+            %% Correlations
+            
+            for b = 1:n_smps+1
+                
+                same_context_weight_twogroup = [0,0];
+                diff_context_weight = 0;
+                
+                %% Segs for the same duration
+                samedur_seg_inds = find(samedur_valid_segs{i});
+                
+                % optionally bootstrap segments
+                if b > 1 && I.nbstraps>0
+                    error('Need to implement bootstrapping');
+                end
+                
+                % add to the count
+                if q == 1
+                    L.n_total_segs(i,b) = L.n_total_segs(i,b) + length(samedur_seg_inds);
+                end
+                
+                % optionally permute segment orders
+                if b > 1 && I.nperms>0
+                    xi = randperm(length(samedur_seg_inds));
+                    samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds(xi)];
+                    clear xi;
+                else
+                    samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
+                end
+                
+                %% Segs for different duration
+                
+                diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                for j = 1:n_longer_seg_durs(i)
+                    
+                    diffdur_seg_inds = find(diffdur_valid_segs{i}(:,j));
+                    
+                    % optionally bootstrap segments
+                    if b > 1 && I.nbstraps>0
+                        error('Need to implement bootstrapping');
+                    end
+                    
+                    % add to the count
+                    L.n_total_segs(i,b) = L.n_total_segs(i,b) + length(diffdur_seg_inds);
+                    
+                    % optionally permute segment orders
+                    if b > 1 && I.nperms>0
+                        xi = randperm(length(diffdur_seg_inds));
+                        diffdur_seg_pairs{j} = [diffdur_seg_inds, diffdur_seg_inds(xi)];
+                        clear xi;
+                    else
+                        diffdur_seg_pairs{j} = [diffdur_seg_inds, diffdur_seg_inds];
+                    end
+                end
+                
+                %% Same duration, same context
+                
+                weight = tranweightfn(size(samedur_seg_pairs,1)); % standard error
+                for k = 1:size(samedur_samecontext_pairs,3)
+                    p_orders = samedur_samecontext_pairs(:,1,k);
+                    p_reps = samedur_samecontext_pairs(:,2,k);
+                    g = group_index(k);
+                    
+                    X1 = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), p_reps(1));
+                    X2 = Y_seg(samedur_seg_pairs(:,2), :, p_orders(2), p_reps(2));
+                    
+                    C = trancorrfn(simfunc(X1, X2));
+                    if all(~isnan(C))
+                        L.same_context_twogroups(:,i,q,b,g) = L.same_context_twogroups(:,i,q,b,g) + C' * weight;
+                        same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
+                    end
+                end
+                
+                %% Same duration, different context
+                
+                weight = tranweightfn(size(samedur_seg_pairs,1)); % standard error
+                for k = 1:size(samedur_diffcontext_pairs,3)
+                    p_orders = samedur_diffcontext_pairs(:,1,k);
+                    p_reps = samedur_diffcontext_pairs(:,2,k);
+                    
+                    X1 = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), p_reps(1));
+                    X2 = Y_seg(samedur_seg_pairs(:,2), :, p_orders(2), p_reps(2));
+                    
+                    C = trancorrfn(simfunc(X1, X2));
+                    if all(~isnan(C))
+                        L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
+                        diff_context_weight = diff_context_weight + weight;
+                    end
+                end
+                
+                %% Different duration, same context
+                
+                for j = 1:n_longer_seg_durs(i)
+                    weight = tranweightfn(size(diffdur_seg_pairs{j},1)); % standard error
+                    for k = 1:size(diffdur_samecontext_pairs,3)
+                        assert(diffdur_samecontext_pairs(1,1,k)==diffdur_samecontext_pairs(2,1,k));
+                        seg_type = diffdur_samecontext_pairs(1,1,k);
+                        p_orders = diffdur_samecontext_pairs(:,2,k);
+                        p_reps = diffdur_samecontext_pairs(:,3,k);
+                        g = group_index(k);
+                        
+                        if seg_type == 1
+                            X1 = Y_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), p_reps(1));
+                            X2 = Y_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), p_reps(2));
+                        else
+                            X1 = Y_embed_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), j, p_reps(1));
+                            X2 = Y_embed_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), j, p_reps(2));
+                        end
+                        
+                        C = trancorrfn(simfunc(X1, X2));
+                        if all(~isnan(C))
+                            L.same_context_twogroups(:,i,q,b,g) = L.same_context_twogroups(:,i,q,b,g) + C' * weight;
+                            same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
+                        end
+                    end
+                end
+                
+                %% Different duration, different context
+                
+                for j = 1:n_longer_seg_durs(i)
+                    weight = tranweightfn(size(diffdur_seg_pairs{j},1)); % standard error
+                    for k = 1:size(diffdur_diffcontext_pairs,3)
+                        assert(all(diffdur_diffcontext_pairs(:,1,k)==[1,2]'));
+                        p_orders = diffdur_diffcontext_pairs(:,2,k);
+                        p_reps = diffdur_diffcontext_pairs(:,3,k);
+                        
+                        X1 = Y_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), p_reps(1));
+                        X2 = Y_embed_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), j, p_reps(2));
+                        
+                        C = trancorrfn(simfunc(X1, X2));
+                        if all(~isnan(C))
+                            L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
+                            diff_context_weight = diff_context_weight + weight;
+                        end
+                    end
+                end
+                
+                % divide by weights
+                L.same_context_twogroups(:,i,q,b,1) = L.same_context_twogroups(:,i,q,b,1)/same_context_weight_twogroup(1);
+                L.same_context_twogroups(:,i,q,b,2) = L.same_context_twogroups(:,i,q,b,2)/same_context_weight_twogroup(2);
+                L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b)/diff_context_weight;
+                
+                % average and substract the two groups
+                L.same_context(:,i,q,b) = L.same_context_twogroups(:,i,q,b,1)/2 + L.same_context_twogroups(:,i,q,b,2)/2;
+                L.same_context_err(:,i,q,b) = (L.same_context_twogroups(:,i,q,b,1)/2 - L.same_context_twogroups(:,i,q,b,2)/2).^2;
+                
+            end
+        end
+    end
+    
+    % additional parameters
+    L.channels = I.channels;
+    L.param_string = param_string;
+    L.chnames = I.chnames(I.channels);
+    L.boundary = I.boundary;
+    L.figure_directory = [I.figure_directory '/' param_string];
+    L.output_directory = [I.output_directory '/' param_string];
+    L.rampwin = S.rampwin;
+    L.rampdur = S.rampdur;
+    
+    % bootstrapped error
+    if I.nbstraps>0
+        X = L.same_context(:,:,:,2:end);
+        Y = bsxfun(@minus, X, mean(X,4)).^2;
+        L.same_context_bstrap_err = mean(Y(:,:,:,:),4);
+        clear X Y;
     end
     
     save(MAT_file, 'L');
@@ -853,43 +782,12 @@ else
     
 end
 
-% same context s
-if I.nbstraps>0
-    X = L.same_context(:,:,:,2:end);
-    Y = bsxfun(@minus, X, mean(X,4)).^2;
-    L.same_context_bstrap_err = mean(Y(:,:,:,:),4);
-    clear X;
-end
-
-% save additional parameters
-L.channels = I.channels;
-L.param_string = param_string;
-L.chnames = I.chnames(I.channels);
-L.boundary = I.boundary;
-L.figure_directory = [I.figure_directory '/' param_string];
-L.output_directory = [I.output_directory '/' param_string];
-L.rampwin = S.rampwin;
-L.rampdur = S.rampdur;
-save(MAT_file, 'L');
-
 %% Plotting
 
 if I.plot_figure
     
     n_seg_durs = length(L.unique_segs);
-    
-    switch L.boundary
-        case 'none'
-            n_short_seg_durs = n_seg_durs;
-        case {'noleft', 'noright', 'right','left'}
-            n_short_seg_durs = n_seg_durs-1;
-        case 'nobound'
-            n_short_seg_durs = n_seg_durs-2;
-        case 'yesbound'
-            n_short_seg_durs = n_seg_durs;
-        otherwise
-            error('No matching boundary constraint');
-    end
+   
     
     n_channels = length(L.channels);
     
@@ -915,58 +813,6 @@ if I.plot_figure
         
         for b = bstraps_to_plot
             
-            %% adaptation plot
-            
-            if I.plot_adaptation && b == 0
-                clf(I.figh);
-                set(I.figh, 'Position', [100, 100, 900, 900]);
-                figure(I.figh);
-                X = L.mean_diff_tc_segdur(:,:,:,q);
-                adapt_range = quantile(X(:), [0.001, 0.999]);
-                for k = 1:n_short_seg_durs
-                    
-                    subplot(4, 2, k);
-                    
-                    % now find responses for corresponding segments in the longer (or equal duration) stimuli
-                    % boundary constraint controls which segment durations we can use
-                    switch I.boundary
-                        case 'none'
-                            long_seg_dur_inds = k:n_seg_durs;
-                        case {'noleft', 'noright', 'right','left'}
-                            long_seg_dur_inds = k+1:n_seg_durs;
-                        case 'nobound'
-                            long_seg_dur_inds = k+2:n_seg_durs;
-                        case 'yesbound'
-                            long_seg_dur_inds = k;
-                        otherwise
-                            error('No matching boundary constraint');
-                    end
-                    n_long_seg_durs = length(long_seg_dur_inds);
-                    
-                    h = plot(L.lag_t * 1000, squeeze_dims(L.mean_diff_tc_segdur(:,k,long_seg_dur_inds,q),2), 'LineWidth', 2);
-                    hold on;
-                    plot([0 0], adapt_range, 'r--', 'LineWidth', 2);
-                    plot(L.unique_segs(k)*[1 1], adapt_range, 'r--', 'LineWidth', 2);
-                    plot(I.plot_win * 1000, [0 0], 'k--', 'LineWidth', 2);
-                    xlim(I.plot_win * 1000);
-                    ylim(adapt_range);
-                    xlabel('Time Lag (ms)');
-                    ylabel('Mean tc diff');
-                    title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
-                    legend_names = cell(1, n_long_seg_durs);
-                    for l = 1:n_long_seg_durs
-                        legend_names{l} = sprintf('%.0f ms', L.unique_segs(long_seg_dur_inds(l)));
-                    end
-                    legend(h, legend_names{:}, 'Location', 'Best');
-                    
-                end
-                fname = mkpdir([L.figure_directory '/cross-context-corr/' chname ...
-                    '-win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2)) '-adapt' ...
-                    '-range' num2str(adapt_range(1), '%.2f') '-' num2str(adapt_range(2), '%.2f')]);
-                export_fig([fname '.pdf'], '-pdf', '-transparent');
-                export_fig([fname '.png'], '-png', '-transparent', '-r150');
-            end
-            
             %% Lag results
             
             same_context = L.same_context(:,:,:,b+1);
@@ -986,7 +832,7 @@ if I.plot_figure
             else
                 corr_range = [0 1];
             end
-            for k = 1:n_short_seg_durs
+            for k = 1:n_seg_durs
                 subplot(4, 2, k);
                 X = [same_context(:,k,q), diff_context(:,k,q)];
                 plot(L.lag_t * 1000, X, 'LineWidth', 2);
