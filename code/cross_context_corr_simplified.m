@@ -1,7 +1,7 @@
 function [L, MAT_file] = cross_context_corr_simplified(D, t, S, varargin)
 
 % Calculates cross and same context correlation for different lags
-% relatice to segment onset.
+% relative to segment onset.
 %
 % D: time x stim x channel x repetition
 %
@@ -9,72 +9,72 @@ function [L, MAT_file] = cross_context_corr_simplified(D, t, S, varargin)
 %
 % S: structure with stimulsus information
 %
-% See comments below for optional inputs (all fields of I)
+% See comments below for optional inputs below (fields of I)
 
-%% Default parameters
+%% Optional parameters and defaults
 
 clear I;
 
-% similarity metric used to compare responses
-% across contexts
-% options are:
-% 'corr' (pearson correlation) the default
-% 'nse' (normalized squared error)
-I.simfunc = 'corr';
-
-% boundary constraint
-% 'none': no constraint
-% 'noleft': short seg cannot be on left boundary of long seg
-% 'noright': short seg cannot be on right boundary of long seg
-% 'nobound': short seg cannot be on either boundary of long seg
-% 'yesbound': short seg must be on boundary of the "longer" seg
-% 'right': must be on right of boundary
-% 'left': must be on left of boundary
-% (in practice means we must use same segment duration)
-I.boundary = 'none';
-
-% compare segments from the same repetition when context is different?
-I.samerep = false;
-
-% odd-even
-I.oddeven = false;
-
-% window of lags computed
-I.lag_win = [0, 2*max(S.segs(:))/1000];
+% window used to compute lags
+I.lag_win = 2*max(S.segs(:))/1000*[-1,1];
 
 % window used for plotting
 I.plot_win = I.lag_win;
 
-% can optionally force the longer of the two segment durations being
-% compared to have a fixed value
-I.longsegdurs = NaN;
+% boundary constraint
+% 'any': all segment comparisons allowed
+% 'samedur': segments must be of equal duration (i.e. no embedded segs)
+% 'diffdur': segments must of different durations (i.e. only embedded segs)
+% 'noleft': shorter seg cannot be on left boundary of longer seg
+% 'noright': shorter seg cannot be on right boundary of longer seg
+% 'right': shorter seg must be on right of boundary
+% 'left': shorter seg must be on left of boundary
+I.boundary = 'any';
+
+% metric used to compare responses across contexts:
+% 'corr': pearson correlation
+% 'nse': normalized squared error
+% 'mae': minimum absolute error
+I.simfunc = 'corr';
 
 % channels for which to perform analysis (default: all)
 I.channels = 1:size(D,3);
 
-% whether to plot figures
-I.plot_figure = true;
-I.plot_adaptation = false;
+% whether to interleave shorter and longer segments
+I.interleave = true;
 
-% range of values to plot
-% if NaN, chosen based on max value of data
-I.plot_range = NaN;
+% can optionally force the longer of the two segment durations being
+% compared to have a fixed set of values
+I.longsegdurs = NaN;
 
-% whether to overwrite or debug
-I.keyboard = false;
-I.overwrite = false;
+% whether to compare different contexts from the same repetition
+I.samerep = false;
+
+% whether to average across odd and even runs
+% alternative is to compare all pairs of runs (the default)
+% can optionally force there to be an equal number of odd and even runs by
+% discarding extra odd runs
+I.oddeven = false;
+I.oddevenmatch = false;
 
 % can exclude segments that come from particular sources
 % the sources are specified in S.sources
 % specify the indices of the sources to exclude
 I.excludesources = [];
 
-% function to transfrom correlation values
-% options are 'none', 'z' (ztransform)
+% whether to overwrite or debug
+I.keyboard = false;
+I.overwrite = false;
+
+% function to transfrom correlation values:
+% 'none': no transformation (default)
+% 'z': fisher z-transform
 I.trancorr = 'none';
 
-% function used to transform weights
-% options are 'none', 'sqrt', 'sqrtm3' (square root minus three)
+% function used to transform weights:
+% 'none': no transformation
+% 'sqrt': square root
+% 'sqrtm3': square root minus three (based on standard error of z values)
 I.tranweight = 'none';
 
 % directory to save results to
@@ -90,32 +90,32 @@ for i = 1:size(D,3)
     I.chnames{i} = ['ch' num2str(i)];
 end
 
-% if false, no analysis is performed, but MAT file is returned
-I.run = true;
-
 % number of permutations
 I.nperms = 0;
 
 % number of bootstrapped samples
+% and type of bootstrapping to perform
+% ** Still needs to be coded **
 I.nbstraps = 0;
-
-% whether to bootstrap across sources or segments
 I.bstraptype = 'sources';
-
-% random seed, e.g. for bootstrapping
-I.randseed = 1;
-
-% whether to plot bootstrapped samples
 I.plot_bstraps = false;
 
-% whether to interleave short and long segments
-I.interleave = false;
+% random seed, only relevant for random processes 
+% (e.g. permutation testing or bootstrapping)
+I.randseed = 1;
 
-% used for debugging purposes
-I.simoffset = false;
+% whether to plot figures
+I.plot_figure = true;
+
+% range of values to plot
+% if NaN, set to central 98% of plotted values
+I.plot_range = NaN;
 
 % figure handle
 I.figh = matlab.ui.Figure.empty;
+
+% if false, no analysis is performed, but MAT file is returned
+I.run = true;
 
 %% Parse user-specified parameters, create parameter string for this analysis
 
@@ -139,67 +139,32 @@ if I.keyboard
     keyboard
 end
 
-% parameter with optional arguments
+% string with key parameter values
+% always include boundary and lag_win
+% for other parameters include them if 
+% they changed from their default values
 always_include = {'boundary','lag_win'};
 always_exclude = {...
-    'plot_win', 'plot_figure', 'plot_adaptation', 'plot_range', ...
+    'plot_win', 'plot_figure', 'plot_range', ...
     'keyboard', 'overwrite', 'output_directory', 'figure_directory', ...
-    'chnames','run','figh', 'plot_bstraps'};
+    'chnames', 'run', 'figh', 'plot_bstraps'};
 param_string = optInputs_to_string(I, C_value, always_include, always_exclude);
 
-% directory and MAT file to save results to
+% MAT file to save results to
 MAT_file = mkpdir([I.output_directory '/' param_string '/corr_data.mat']);
 
 % can stop and just return the MAT_file
 % (useful to check if it exists)
 if ~I.run
     clear L;
-    L.channels = I.channels;
     L.param_string = param_string;
-    L.chnames = I.chnames(I.channels);
-    L.boundary = I.boundary;
     L.figure_directory = [I.figure_directory '/' param_string];
     L.output_directory = [I.output_directory '/' param_string];
-    L.rampwin = S.rampwin;
-    L.rampdur = S.rampdur;
-    L.sr = 1/(t(2)-t(1));
-    L.lag_t = I.lag_win(1):1/L.sr:I.lag_win(2);
     return;
 end
 
-% function used to transform correlation
-switch I.trancorr
-    case 'none'
-        trancorrfn = @(x)x;
-    case 'z'
-        trancorrfn = @(x)atanh(x);
-    otherwise
-        error('No matching trancorr parameter');
-end
 
-% function used to transform weights
-switch I.tranweight
-    case 'none'
-        tranweightfn = @(x)x;
-    case 'sqrt'
-        tranweightfn = @(x)sqrt(x);
-    case 'sqrtm3'
-        tranweightfn = @(x)sqrt(x-3);
-    otherwise
-        error('No matching tranweight parameter');
-end
-
-% similarity function used to compare responses
-switch I.simfunc
-    case 'corr'
-        simfunc = @nanfastcorr;
-    case 'nse'
-        simfunc = @nan_nse_match_columns;
-    case 'mae'
-        simfunc = @(a,b)nanmean(-abs(a-b),1);
-    otherwise
-        error('No matching similarity function')
-end
+%% Do the analysis!
 
 if ~exist(MAT_file, 'file') || I.overwrite
     
@@ -230,33 +195,80 @@ if ~exist(MAT_file, 'file') || I.overwrite
     n_reps = sum(xi);
     clear xi;
     
-    % average odd and even reps
+    % optionally average odd and even reps
     if I.oddeven
-        D_noNaN = cat(4, nanmean(D_noNaN(:,:,:,1:2:end),4), nanmean(D_noNaN(:,:,:,2:2:end),4));
+        odd_reps = 1:2:n_reps;
+        even_reps = 2:2:n_reps;
+        if I.oddevenmatch
+            odd_reps = odd_reps(1:length(even_reps));
+        end
+        D_noNaN = cat(4, ...
+            nanmean(D_noNaN(:,:,:,odd_reps),4), ...
+            nanmean(D_noNaN(:,:,:,even_reps),4));
         n_reps = 2;
+        clear odd_reps even_reps;
     end
     
     % number of additional bootstrapped or permuted samples (not both)
     assert(~(I.nperms>0 && I.nbstraps>0))
     n_smps = max([I.nperms, I.nbstraps]);
         
+    %% Short functions used later on
+    
+    % function used to transform correlation
+    switch I.trancorr
+        case 'none'
+            trancorrfn = @(x)x;
+        case 'z'
+            trancorrfn = @(x)atanh(x);
+        otherwise
+            error('No matching trancorr parameter');
+    end
+    
+    % function used to transform weights
+    switch I.tranweight
+        case 'none'
+            tranweightfn = @(x)x;
+        case 'sqrt'
+            tranweightfn = @(x)sqrt(x);
+        case 'sqrtm3'
+            tranweightfn = @(x)sqrt(x-3);
+        otherwise
+            error('No matching tranweight parameter');
+    end
+    
+    % similarity function used to compare responses
+    switch I.simfunc
+        case 'corr'
+            simfunc = @nanfastcorr;
+        case 'nse'
+            simfunc = @nan_nse_match_columns;
+        case 'mae'
+            simfunc = @(a,b)nanmean(-abs(a-b),1);
+        otherwise
+            error('No matching similarity function')
+    end
+    
     %% Determine pairings for same duration, same context
     
     % pairings of orders and repetitions for computing the same-context
     % correlation between segments of the same duration
-    % columns: order and repetition values
+    % columns: (order, repetition)
     % rows: the two elements of each pair
     % 3rd dim: different pairs
     % group_index is used to compute two separate
     % independent estimates of the same context correlation
-    samedur_samecontext_pairs = [];
-    group_index = [];
-    for o = 1:n_orders
-        for r1 = 1:n_reps
-            for r2 = r1+1:n_reps
-                new_pair = [o, r1; o, r2];
-                samedur_samecontext_pairs = cat(3, samedur_samecontext_pairs, new_pair);
-                group_index = cat(1, group_index, mod(o-1,2)+1);
+    % only relevant if there are multiple orders for the same duration
+    if n_orders > 1 && ~strcmp(I.boundary, 'diffdur')
+        samedur_samecontext_pairs = [];
+        group_index = [];
+        for o = 1:n_orders
+            for r1 = 1:n_reps
+                for r2 = r1+1:n_reps
+                    new_pair = [o, r1; o, r2];
+                    samedur_samecontext_pairs = cat(3, samedur_samecontext_pairs, new_pair);
+                    group_index = cat(1, group_index, mod(o-1,2)+1);
+                end
             end
         end
     end
@@ -266,23 +278,25 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % pairings of orders and repetitions for computing the different-context
     % correlation between segments of the same duration
     % segments with thee same duration
-    % columns: order and repetition values
+    % columns: (order, repetition)
     % rows: the two elements of each pair
     % 3rd dim: different pairs
-    samedur_diffcontext_pairs = [];
-    for o1 = 1:n_orders
-        for o2 = o1+1:n_orders
-            for r1 = 1:n_reps
-                if I.samerep
-                    second_reps = 1:n_reps;
-                else
-                    second_reps = [1:r1-1,r1+1:n_reps];
+    if n_orders > 1 && ~strcmp(I.boundary, 'diffdur')
+        samedur_diffcontext_pairs = [];
+        for o1 = 1:n_orders
+            for o2 = o1+1:n_orders
+                for r1 = 1:n_reps
+                    if I.samerep
+                        second_reps = 1:n_reps;
+                    else
+                        second_reps = [1:r1-1,r1+1:n_reps];
+                    end
+                    for r2 = second_reps
+                        new_pair = [o1, r1; o2, r2];
+                        samedur_diffcontext_pairs = cat(3, samedur_diffcontext_pairs, new_pair);
+                    end
+                    clear second_reps;
                 end
-                for r2 = second_reps
-                    new_pair = [o1, r1; o2, r2];
-                    samedur_diffcontext_pairs = cat(3, samedur_diffcontext_pairs, new_pair);
-                end
-                clear second_reps;
             end
         end
     end
@@ -291,7 +305,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % pairings of orders and repetitions for computing the same-context
     % correlation between segments of different durations
-    % columns: duration, order, repetition, and duration (short vs. long) values
+    % columns: (duration, order, repetition)
     % rows: the two elements of each pair
     % 3rd dim: different pairs
     % group_index is used to compute two separate
@@ -319,7 +333,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % pairings of orders and repetitions for computing the different-context
     % correlation between segments of different duration
     % segments with thee same duration
-    % columns: duration, order and repetition values
+    % columns: (duration, order, repetition)
     % rows: the two elements of each pair
     % 3rd dim: different pairs
     diffdur_diffcontext_pairs = [];
@@ -399,9 +413,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
         
         % determine which segments are valid for same-duration comparisons
         switch I.boundary
-            case {'none', 'yesbound', 'left', 'right'}
+            case {'any', 'samedur', 'left', 'right'}
                 samedur_valid_segs{i} = true(n_segs_per_scramstim(i),1);
-            case {'nobound', 'noleft', 'noright'}
+            case {'diffdur', 'noleft', 'noright'}
                 samedur_valid_segs{i} = false(n_segs_per_scramstim(i),1);
             otherwise
                 error('No matching boundary constraint');
@@ -411,7 +425,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         
         % now find responses for corresponding segments in the longer (or equal duration) stimuli
         % boundary constraint controls which segment durations we can use
-        if strcmp(I.boundary, 'yesbound')
+        if strcmp(I.boundary, 'samedur')
             longer_seg_dur_inds{i} = [];
         else
             longer_seg_dur_inds{i} = i+1:n_seg_durs;
@@ -469,7 +483,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     on_either_boundary = on_left_boundary || on_right_boundary;
                     on_both_boundary = on_left_boundary && on_right_boundary;
                     switch I.boundary
-                        case 'none'
+                        case 'any'
                             diffdur_valid_segs{i}(k, j) = true;
                         case 'noleft'
                             if ~on_left_boundary
@@ -495,13 +509,13 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             else
                                 diffdur_valid_segs{i}(k, j) = false;
                             end
-                        case 'nobound'
+                        case 'diffdur'
                             if ~on_either_boundary
                                 diffdur_valid_segs{i}(k, j) = true;
                             else
                                 diffdur_valid_segs{i}(k, j) = false;
                             end
-                        case 'yesbound'
+                        case 'samedur'
                             if on_both_boundary
                                 diffdur_valid_segs{i}(k, j) = true;
                             else
@@ -669,10 +683,19 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     p_reps = samedur_samecontext_pairs(:,2,k);
                     g = group_index(k);
                     
+                    % select segs to be compared
                     X1 = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), p_reps(1));
                     X2 = Y_seg(samedur_seg_pairs(:,2), :, p_orders(2), p_reps(2));
                     
+                    % optionally interleave values
+                    if I.interleave
+                        [X1, X2] = interleave_oddeven(X1, X2);
+                    end
+                    
+                    % correlate
                     C = trancorrfn(simfunc(X1, X2));
+                    
+                    % accumulate correlation values
                     if all(~isnan(C))
                         L.same_context_twogroups(:,i,q,b,g) = L.same_context_twogroups(:,i,q,b,g) + C' * weight;
                         same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
@@ -686,10 +709,19 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     p_orders = samedur_diffcontext_pairs(:,1,k);
                     p_reps = samedur_diffcontext_pairs(:,2,k);
                     
+                    % select segs to be compared
                     X1 = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), p_reps(1));
                     X2 = Y_seg(samedur_seg_pairs(:,2), :, p_orders(2), p_reps(2));
                     
+                    % optionally interleave values
+                    if I.interleave
+                        [X1, X2] = interleave_oddeven(X1, X2);
+                    end
+                    
+                    % correlate
                     C = trancorrfn(simfunc(X1, X2));
+                    
+                     % accumulate correlation values
                     if all(~isnan(C))
                         L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
                         diff_context_weight = diff_context_weight + weight;
@@ -707,6 +739,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         p_reps = diffdur_samecontext_pairs(:,3,k);
                         g = group_index(k);
                         
+                        % select segs to be compared
                         if seg_type == 1
                             X1 = Y_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), p_reps(1));
                             X2 = Y_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), p_reps(2));
@@ -715,7 +748,14 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             X2 = Y_embed_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), j, p_reps(2));
                         end
                         
+                        % optionally interleave values
+                        if I.interleave
+                            [X1, X2] = interleave_oddeven(X1, X2);
+                        end
+                        
+                        % correlate
                         C = trancorrfn(simfunc(X1, X2));
+                    
                         if all(~isnan(C))
                             L.same_context_twogroups(:,i,q,b,g) = L.same_context_twogroups(:,i,q,b,g) + C' * weight;
                             same_context_weight_twogroup(g) = same_context_weight_twogroup(g) + weight;
@@ -732,10 +772,19 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         p_orders = diffdur_diffcontext_pairs(:,2,k);
                         p_reps = diffdur_diffcontext_pairs(:,3,k);
                         
+                        % select segs to be compared
                         X1 = Y_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), p_reps(1));
                         X2 = Y_embed_seg(diffdur_seg_pairs{j}(:,2), :, p_orders(2), j, p_reps(2));
                         
+                        % optionally interleave values
+                        if I.interleave
+                            [X1, X2] = interleave_oddeven(X1, X2);
+                        end
+                        
+                        % correlate
                         C = trancorrfn(simfunc(X1, X2));
+                        
+                        % accumulate
                         if all(~isnan(C))
                             L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
                             diff_context_weight = diff_context_weight + weight;
