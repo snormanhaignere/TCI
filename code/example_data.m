@@ -15,9 +15,9 @@ tic;
 root_directory = '/Users/svnh2/Desktop/projects';
 addpath([root_directory '/general-analysis-code']);
 addpath([root_directory '/export_fig_v3']);
-directory_to_save_results = [TCI_directory '/results/v4'];
+directory_to_save_results = [TCI_directory '/results/further-simplified'];
 L = cross_context_corr_further_simplified(D, t, S, 'chnames', chnames, ...
-    'output_directory', directory_to_save_results, 'boundary', 'any', ...
+    'output_directory', directory_to_save_results, 'boundary', 'noleftright', ...
     'overwrite', false, 'plot_figure', true, 'interleave', true, 'lag_win', [0, 1]);
 toc;
 
