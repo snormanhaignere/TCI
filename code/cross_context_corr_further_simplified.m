@@ -575,7 +575,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 assert(sum(xi)==1);
                 X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
                 for k = 1:n_segs_per_scramstim(i) % loop through all segments
-                    if samedur_valid_segs{i}(k) || any(diffdur_valid_segs{i}(k, :))
+                    if ((make_samedur_comparisons && samedur_valid_segs{i}(k)) || ...
+                        (make_diffdur_comparisons && any(diffdur_valid_segs{i}(k, :))))
                         targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
                         ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
                         Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
