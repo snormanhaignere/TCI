@@ -447,9 +447,9 @@ if I.plot_figure
                     subplot(4, 2, k);
                     hold on;
                     plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', 2);
-                    h1 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s), 'LineWidth', 2);
-                    h2 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s), 'LineWidth', 2);
-                    h3 = plot(L.lag_t * 1000, M.same_context(:,k,q,s), 'LineWidth', 2);
+                    h1 = plot(L.lag_t * 1000, M.same_context(:,k,q,s), 'LineWidth', 2);
+                    h2 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s), 'LineWidth', 2);
+                    h3 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s), 'LineWidth', 2);
                     plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', 2);
                     if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
                     xlim(I.plot_win * 1000);
@@ -458,7 +458,7 @@ if I.plot_figure
                     ylabel('Pearson Correlation');
                     title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
                     if k == 1
-                        legend([h1, h2, h3], 'Cross', 'Model', 'Same');
+                        legend([h1, h2, h3], 'Same', 'Cross', 'Model');
                     end
                     box off;
                 end
