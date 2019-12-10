@@ -1,4 +1,4 @@
-function [L, MAT_file] = cross_context_corr_further_simplified(D, t, S, varargin)
+function [L, MAT_file] = cross_context_corr(D, t, S, varargin)
 
 % Calculates cross and same context correlation for different lags
 % relative to segment onset.
