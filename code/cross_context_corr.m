@@ -103,6 +103,12 @@ I.nperms = 0;
 I.nbstraps = 0;
 I.bstraptype = 'sources';
 
+% number of splits of segments
+I.nsplits = 1;
+I.splitfac = 1;
+I.splitrand = false;
+I.splitbysource = false;
+
 % whether to plot additional
 % samples computed via permutation test
 % or bootstrapping
@@ -218,8 +224,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
     end
     
     % number of additional bootstrapped or permuted samples (not both)
-    assert(~(I.nperms>0 && I.nbstraps>0))
-    n_smps = max([I.nperms, I.nbstraps]);
+    assert(sum(I.nperms>0 && I.nbstraps>0 && I.nsplits) < 2)
+    n_smps = max([I.nperms, I.nbstraps, I.nsplits]);
     
     %% Short functions used later on
     
@@ -356,6 +362,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     diffdur_valid_segs = cell(1, n_seg_durs);
     longer_seg_dur_inds = cell(1, n_seg_durs);
     n_longer_seg_durs = nan(1, n_seg_durs);
+    source_labels = cell(1, n_seg_durs);
     for i = 1:n_seg_durs
         
         % duration and number of segments in the scrambled stimulus
@@ -374,8 +381,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
         clear xi;
         
         % for each segment a label indicating the source it came from
-        source_labels = repmat(1:n_sourcestim, n_segs_per_sourcestim, 1);
-        assert(numel(source_labels)==n_segs_per_scramstim(i));
+        source_labels{i} = repmat(1:n_sourcestim, n_segs_per_sourcestim, 1);
+        assert(numel(source_labels{i})==n_segs_per_scramstim(i));
         
         % onset of each segment in the original source stimulus
         seg_onsets_in_sourcestim = (0:n_segs_per_sourcestim-1)*seg_dur;
@@ -394,7 +401,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         % in this case the only reason a segment would be invalid is if 
         % its source was excluded
         if make_samedur_comparisons
-            samedur_valid_segs{i} = ~ismember(source_labels(:), I.excludesources(:));
+            samedur_valid_segs{i} = ~ismember(source_labels{i}(:), I.excludesources(:));
         end
         
         %% Now find embedded segments
@@ -448,7 +455,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     for k = 1:n_segs_per_scramstim(i)
                         
                         % if seg should be excluded, we can skip the rest
-                        if any(source_labels(k)==I.excludesources)
+                        if any(source_labels{i}(k)==I.excludesources)
                             
                             diffdur_valid_segs{i}(k, j) = false;
                             
@@ -536,9 +543,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
         %% double check the excluded sources are absent
         
         if ~isempty(I.excludesources)
-            assert(isempty(intersect(source_labels(samedur_valid_segs{i}), I.excludesources)));
+            assert(isempty(intersect(source_labels{i}(samedur_valid_segs{i}), I.excludesources)));
             for j = 1:n_longer_seg_durs(i)
-                assert(isempty(intersect(source_labels(diffdur_valid_segs{i}(:,j)), I.excludesources)));
+                assert(isempty(intersect(source_labels{i}(diffdur_valid_segs{i}(:,j)), I.excludesources)));
             end
         end
         
@@ -606,6 +613,27 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 end
             end
             
+            %% Split index if we're doing splits
+            
+            if I.nsplits > 1
+                N = n_segs_per_scramstim(i);
+                assert(N==length(samedur_valid_segs{i}))
+                if I.splitbysource
+                    chunk_index = source_labels{i}(:)-1;
+                else
+                    chunkforsplit = N/(I.nsplits*I.splitfac);
+                    chunk_index = floor((0:N-1)/(chunkforsplit));
+                    clear chunkforsplit;
+                end
+                if I.splitrand
+                    xi = randperm(chunk_index(end)+1);
+                    chunk_index = xi(chunk_index+1)-1;
+                    clear xi;
+                end
+                split_index = mod(chunk_index, I.nsplits)+1;
+                clear N chunk_index;
+            end
+            
             %% Correlations
             
             for b = 1:n_smps+1
@@ -624,10 +652,19 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         error('Need to implement bootstrapping');
                     end
                     
+                    % select segments for different splits
+                    if b > 1 && I.nsplits > 1
+                        if ~isempty(samedur_seg_inds)
+                            samedur_seg_inds = intersect(samedur_seg_inds, find(split_index==(b-1)));
+                            assert(~isempty(samedur_seg_inds));
+                        end
+                    end
+                    
                     % add to the count
                     if q == 1
                         L.n_total_segs(i,b) = L.n_total_segs(i,b) + length(samedur_seg_inds);
                     end
+                    
                     
                     % optionally permute segment orders
                     if b > 1 && I.nperms > 0
@@ -651,6 +688,14 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         % optionally bootstrap segments
                         if b > 1 && I.nbstraps>0
                             error('Need to implement bootstrapping');
+                        end
+                        
+                        % select segments for different splits
+                        if b > 1 && I.nsplits > 1
+                            if ~isempty(diffdur_seg_inds)
+                                diffdur_seg_inds = intersect(diffdur_seg_inds, find(split_index==(b-1)));
+                                assert(~isempty(diffdur_seg_inds));
+                            end
                         end
                         
                         % add to the count
@@ -827,7 +872,7 @@ if I.plot_figure
         
         % samples to plot
         if I.plot_extra_smps
-            smps_to_plot = 1:n_smps+1;
+            smps_to_plot = 1:n_smps;
         else
             smps_to_plot = 1;
         end
@@ -869,12 +914,15 @@ if I.plot_figure
                     legend('Same', 'Cross');
                 end
             end
+            if b > 0
+                smpstr = ['-smp' num2str(b)];
+            else
+                smpstr = '';
+            end
             fname = [L.figure_directory '/cross-context-corr/' chname ...
                 '-win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2)) ...
-                '-range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
-            if b > 0
-                fname = [fname '_smp' num2str(b)]; %#ok<AGROW>
-            end
+                smpstr '-range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
+
             export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
             export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
         end
