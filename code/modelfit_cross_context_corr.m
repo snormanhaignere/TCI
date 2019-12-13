@@ -96,6 +96,9 @@ I.plot_figure = true;
 % window used for plotting
 I.plot_win = L.lag_t([1 end]); % in seconds
 
+% line width for plotting
+I.linewidth = 2;
+
 % quantile of error map to plot
 I.ploterrquant = 0.3;
 
@@ -126,7 +129,7 @@ end
 % string with modeling parameters
 always_include = {'lossfn'};
 always_exclude = {...
-    'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', ...
+    'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'linewidth', ...
     'overwrite', 'ploterrquant', 'plot_extrasmps', 'plot_delaystat', 'plot_delay_range'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
@@ -169,7 +172,9 @@ switch I.lossfn
     case 'unbiased-sqerr'
         lossfn = @(x,y,w,e)sum(w.*bsxfun(@minus, x, y).^2 - w.*e,1);
     case 'nse'
-        lossfn = @(x,y,w)weighted_nse(x,y,w);
+        lossfn = @(x,y,w)weighted_nse(x,y,w,true);
+    case 'nse-subtract'
+        lossfn = @(x,y,w)weighted_nse(x,y,w,false);
     case 'corr'
         lossfn = @(x,y,w)(-weighted_pearson_corr(x,y,w));
     otherwise
@@ -446,11 +451,11 @@ if I.plot_figure
                 for k = valid_seg_durs
                     subplot(4, 2, k);
                     hold on;
-                    plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', 2);
-                    h1 = plot(L.lag_t * 1000, M.same_context(:,k,q,s), 'LineWidth', 2);
-                    h2 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s), 'LineWidth', 2);
-                    h3 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s), 'LineWidth', 2);
-                    plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', 2);
+                    plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', I.linewidth);
+                    h1 = plot(L.lag_t * 1000, M.same_context(:,k,q,s), 'LineWidth', I.linewidth);
+                    h2 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s), 'LineWidth', I.linewidth);
+                    h3 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s), 'LineWidth', I.linewidth);
+                    plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', I.linewidth);
                     if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
                     xlim(I.plot_win * 1000);
                     ylim(corr_range);

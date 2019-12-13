@@ -89,9 +89,9 @@ end
 if I.plot
     figure;
     subplot(2,1,1);
-    h = plot(t_sec, [h, h_relpower], 'LineWidth', 2);
+    ph = plot(t_sec, [h, h_relpower], 'LineWidth', 2);
     xlim(t_sec([1,end]));
-    legend(h, {'Orig', 'Rel Power'}, 'Location', 'Best');
+    legend(ph, {'Orig', 'Rel Power'}, 'Location', 'Best');
     subplot(2,1,2);
     plot(t, h_delayed, 'LineWidth', 2);
     hold on;

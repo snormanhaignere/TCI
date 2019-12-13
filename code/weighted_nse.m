@@ -1,4 +1,4 @@
-function wnse = weighted_nse(X,Y,W)
+function wnse = weighted_nse(X,Y,W,div)
 
 % Calculates weighted NSE between corresponding columns of
 % X and Y, weighted by W.
@@ -32,4 +32,8 @@ Pxy = sum(bsxfun(@times, W, bsxfun(@times, X, Y)),1);
 % calculate NSE
 a = bsxfun(@plus, Px, Py) - 2 * Pxy;
 b = bsxfun(@plus, Px, Py) - 2 * bsxfun(@times, Mx, My);
-wnse = a ./ b;
+if div
+    wnse = a ./ b;
+else
+    wnse = a - b;
+end
