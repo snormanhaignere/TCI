@@ -830,6 +830,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
     L.rampwin = S.rampwin;
     L.rampdur = S.rampdur;
     
+    % samples that correspond to different splits
+    if I.nsplits>1
+        L.splitsmps = (1:I.nsplits)+1;
+    end
+    
     % bootstrapped error
     if I.nbstraps>0
         X = L.same_context(:,:,:,2:end);

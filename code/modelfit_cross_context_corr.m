@@ -76,7 +76,7 @@ I.nullsmps = 0;
 I.skipnullpreds = true;
 
 % skip calculation of best predictors for extra samples
-I.skipsmppreds = true;
+I.skipsmppreds = ~isfield(L, 'splitsmps');
 
 % seed to create fixed random decision (e.g. for phase scrambling)
 I.randseed = 1;
@@ -106,7 +106,8 @@ I.linewidth = 2;
 I.ploterrquant = 0.3;
 
 % whether to plot bootstrapped samples
-I.plot_extrasmps = false;
+I.plot_extrasmps = isfield(L, 'splitsmps');
+I.plot_nullsmps = false;
 
 % whether to run the analysis
 % if false, just returns the parameters to be used
@@ -193,6 +194,7 @@ assert(n_lags == length(L.lag_t))
 
 if ~exist(MAT_file, 'file') || I.overwrite
     
+    clear M;
     ResetRandStream2(I.randseed);
     
     % error to use for noise correction
@@ -217,7 +219,6 @@ if ~exist(MAT_file, 'file') || I.overwrite
     end
     
     % can optionally create null samples via phase scrambling
-    clear M;
     if I.nullsmps==0
         M.same_context = L.same_context;
         M.diff_context = L.diff_context;
@@ -332,32 +333,35 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.best_delay_sec_median = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_shape = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_loss = nan(n_channels, n_smps, I.nullsmps+1);
-    if isfield(L, 'splitsmps')
-        M.best_loss_cv = zeros(n_channels, n_smps, I.nullsmps+1);
-    end
     for q = 1:n_channels
         for s = 1:n_smps
             
+            % if using cross validation
+            % compute the best model using the mean of
+            % all other samples (from non-permuted data)
+            if isfield(L, 'splitsmps') && any(s == L.splitsmps) 
+                X = mean(M.loss(:,:,:,q,setdiff(L.splitsmps, s),1),4);
+                [~,xi] = min(X(:));
+                [a,b,c] = ind2sub(size(X), xi);
+                clear X;
+                splitsmp = true;
+            else
+                splitsmp = false;
+            end
             
             for l = 1:I.nullsmps+1
-                X = M.loss(:,:,:,q,s,l);
-                [M.best_loss(q,s,l),xi] = min(X(:));
-                [a,b,c] = ind2sub(size(X), xi);
+                if ~splitsmp
+                    X = M.loss(:,:,:,q,s,l);
+                    [~,xi] = min(X(:));
+                    [a,b,c] = ind2sub(size(X), xi);
+                    splitsmp = true;
+                    clear X;
+                end
+                M.best_loss(q,s,l) = M.loss(a,b,c,q,s,l);
                 M.best_intper_sec(q,s,l) = M.intper_sec(a);
                 M.best_delay_sec_start(q,s,l) = M.delay_sec_start(b);
                 M.best_shape(q,s,l) = M.shape(c);
                 M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), M.best_shape(q,s), 'median');
-                clear X;
-                
-                % update cross-validated loss
-                % i.e. compute the loss for all other splits
-                % using the best model from this split
-                if isfield(L, 'splitsmps') && any(s == L.splitsmps) && l == 1
-                    xi = setdiff(L.splitsmps,s);
-                    M.best_loss_cv(q,xi,:) = M.best_loss_cv(q,xi,:) + squeeze_dims(M.loss(a,b,c,q,xi,:),[1,2,3])/(length(L.splitsmps)-1);
-                    clear xi;
-                end
-                clear a b c;
                 
                 % get prediction
                 if (l == 1 || ~I.skipnullpreds) && (s == 1 || ~I.skipsmppreds)
@@ -384,24 +388,19 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
     end
     
+    % compute significance
     if I.nullsmps>0
         % -> null sample x channel by sample
         X = permute(M.best_loss, [3, 1, 2]);
         
+        % average across splits
+        if isfield(L, 'splitsmps')
+            X = mean(X(:,:,L.splitsmps),3);
+        end
+        
         % significance
         M.logP_gaussfit = sig_via_null_gaussfit(-X(1,:,:), -X(2:end,:,:));
         M.logP_counts = sig_via_null_gaussfit(-X(1,:,:), -X(2:end,:,:));
-        if isfield(L, 'splitsmps')
-            % -> null sample x channel by sample
-            X = permute(M.best_loss_cv, [3, 1, 2]);
-            
-            % average across splits
-            X = mean(X(:,:,L.splitsmps),3);
-            
-            % significance
-            M.logP_gaussfit = sig_via_null_gaussfit(-X(1,:), -X(2:end,:));
-            M.logP_counts = sig_via_null_gaussfit(-X(1,:), -X(2:end,:));
-        end
     end
     
     M.channels = L.channels;
@@ -454,7 +453,7 @@ if I.plot_figure
                 end
                 
                 % plot prediction for best delay, lineplot
-                if (s == 1 || ~I.skipnullpreds) && (b==1 || ~I.skipsmppreds)
+                if (s == 1 || ~I.skipsmppreds) && (b == 1 || ~I.skipnullpreds)
                     
                     clf(I.figh);
                     set(I.figh, 'Position', [100, 100, 900, 900]);
