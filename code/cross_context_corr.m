@@ -94,25 +94,13 @@ for i = 1:size(D,3)
     I.chnames{i} = ['ch' num2str(i)];
 end
 
-% number of permutations
-I.nperms = 0;
-
-% number of bootstrapped samples
-% and type of bootstrapping to perform
-% ** Still needs to be coded **
-I.nbstraps = 0;
-I.bstraptype = 'sources';
-
 % number of splits of segments
-I.nsplits = 1;
+I.nsplits = 0;
+I.npartitions = 2;
 I.splitfac = 1;
-I.splitrand = false;
+I.splitrand = true;
 I.splitbysource = false;
-
-% whether to plot additional
-% samples computed via permutation test
-% or bootstrapping
-I.plot_extra_smps = false;
+I.plot_splits = false;
 
 % random seed, only relevant for random processes
 % (e.g. permutation testing or bootstrapping)
@@ -161,7 +149,7 @@ always_include = {'boundary','lag_win'};
 always_exclude = {...
     'plot_win', 'plot_figure', 'plot_range', ...
     'keyboard', 'overwrite', 'output_directory', 'figure_directory', ...
-    'chnames', 'run', 'figh', 'plot_extra_smps'};
+    'chnames', 'run', 'figh', 'plot_splits'};
 param_string = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % MAT file to save results to
@@ -222,10 +210,6 @@ if ~exist(MAT_file, 'file') || I.overwrite
         n_reps = 2;
         clear odd_reps even_reps;
     end
-    
-    % number of additional bootstrapped or permuted samples (not both)
-    assert(sum(I.nperms>0 && I.nbstraps>0 && I.nsplits) < 2)
-    n_smps = max([I.nperms, I.nbstraps, I.nsplits]);
     
     %% Short functions used later on
     
@@ -551,14 +535,42 @@ if ~exist(MAT_file, 'file') || I.overwrite
         
     end
     
+    %% Randomization factor for splits, see code well below for interpretation
+    
+    if I.nsplits>0
+        if I.splitbysource
+            n_chunks_for_splits = n_sourcestim;
+        else
+            n_chunks_for_splits = I.npartitions*I.splitfac;
+        end
+        chunk_mapping_for_splits = nan(n_chunks_for_splits, I.nsplits);
+        for i = 1:I.nsplits
+            if I.splitrand
+                chunk_mapping_for_splits(:,i) = randperm(n_chunks_for_splits);
+            else
+                if i > 1
+                    error('Makes no sense to not randomize across multiple splits');
+                end
+                chunk_mapping_for_splits(:,i) = 1:n_chunks_for_splits;
+            end
+        end
+    end
+    
     %% Now actually do the analysis using the above info
     
     fprintf('Correlation computation\n');
-    L.same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, n_smps+1, 2);
-    L.same_context = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
-    L.same_context_err = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
-    L.diff_context = zeros(n_lags, n_seg_durs, n_channels, n_smps+1);
-    L.n_total_segs = zeros(n_seg_durs,n_smps+1);
+    L.same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, 2);
+    L.same_context = zeros(n_lags, n_seg_durs, n_channels);
+    L.same_context_err = zeros(n_lags, n_seg_durs, n_channels);
+    L.diff_context = zeros(n_lags, n_seg_durs, n_channels);
+    L.n_total_segs = zeros(n_seg_durs);
+    if I.nsplits > 0
+        L.splits_same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits, 2);
+        L.splits_same_context = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits);
+        L.splits_same_context_err = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits);
+        L.splits_diff_context = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits);
+        L.splits_n_total_segs = zeros(n_seg_durs, I.npartitions, I.nsplits);
+    end
     for q = 1:n_channels % analysis is done separately for every channel to save memory
         
         chan = I.channels(q);
@@ -613,209 +625,94 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 end
             end
             
-            %% Split index if we're doing splits
+            %% Pick out valid segments
             
-            if I.nsplits > 1
-                N = n_segs_per_scramstim(i);
-                assert(N==length(samedur_valid_segs{i}))
-                if I.splitbysource
-                    chunk_index = source_labels{i}(:)-1;
-                else
-                    chunkforsplit = N/(I.nsplits*I.splitfac);
-                    chunk_index = floor((0:N-1)/(chunkforsplit));
-                    clear chunkforsplit;
-                end
-                if I.splitrand
-                    xi = randperm(chunk_index(end)+1);
-                    chunk_index = xi(chunk_index+1)-1;
-                    clear xi;
-                end
-                split_index = mod(chunk_index, I.nsplits)+1;
-                clear N chunk_index;
+            if make_samedur_comparisons
+                samedur_seg_inds = find(samedur_valid_segs{i});
+                L.n_total_segs(i) = L.n_total_segs(i) + length(samedur_seg_inds);
+                samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
             end
             
-            %% Correlations
+            if make_diffdur_comparisons
+                diffdur_seg_inds = cell(1, n_longer_seg_durs(i));
+                diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                for j = 1:n_longer_seg_durs(i)
+                    diffdur_seg_inds{j} = find(diffdur_valid_segs{i}(:,j));
+                    L.n_total_segs(i) = L.n_total_segs(i) + length(diffdur_seg_inds{j});
+                    diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
+                end
+            end
             
-            for b = 1:n_smps+1
+            %% Perform correlation analysis
+            
+            [L.diff_context(:,i,q), L.same_context(:,i,q), ...
+                L.same_context_err(:,i,q), L.same_context_twogroups(:,i,q,:)] = ...
+                cross_context_corr_helper(Y_seg, Y_embed_seg, ...
+                samedur_order_pairs, diffdur_order_pairs, ...
+                samecontext_rep_pairs, diffcontext_rep_pairs, ...
+                samedur_seg_pairs, diffdur_seg_pairs, ...
+                make_samedur_comparisons, make_diffdur_comparisons, ...
+                I.interleave_samedur, I.interleave_diffdur, ...
+                simfunc, tranweightfn, trancorrfn);
+            clear samedur_seg_pairs diffdur_seg_pairs;
+            
+            %% Splits analysis
+            
+            % break segments into chunks
+            N = n_segs_per_scramstim(i);
+            assert(N==length(samedur_valid_segs{i}))
+            if I.splitbysource
+                chunk_index = source_labels{i}(:)-1;
+            else
+                chunk_size = N/n_chunks_for_splits;
+                chunk_index = floor((0:N-1)/(chunk_size));
+                clear chunk_size;
+            end
+            assert((chunk_index(end)+1)==n_chunks_for_splits);
+            clear N;
+            
+            for s = 1:I.nsplits
                 
-                same_context_weight_twogroups = [0,0];
-                diff_context_weight = 0;
+                % optionally randomize chunks
+                % then assign chunks to partitions
+                chunk_index_remap = chunk_mapping_for_splits(chunk_index+1,s)-1;
+                partition_index = mod(chunk_index_remap, I.npartitions)+1;
+                clear chunk_index_remap;
                 
-                %% Segs for the same duration
-                
-                if make_samedur_comparisons
+                for p = 1:I.npartitions
                     
-                    samedur_seg_inds = find(samedur_valid_segs{i});
+                    segs_in_this_partition = find(partition_index==p);
                     
-                    % optionally bootstrap segments
-                    if b > 1 && I.nbstraps > 0
-                        error('Need to implement bootstrapping');
+                    % Select segments in each partition
+                    if make_samedur_comparisons
+                        partition_samedur_seg_inds = intersect(samedur_seg_inds, segs_in_this_partition);
+                        assert(~isempty(partition_samedur_seg_inds));
+                        L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
+                        samedur_seg_pairs = [partition_samedur_seg_inds, partition_samedur_seg_inds];
                     end
-                    
-                    % select segments for different splits
-                    if b > 1 && I.nsplits > 1
-                        if ~isempty(samedur_seg_inds)
-                            samedur_seg_inds = intersect(samedur_seg_inds, find(split_index==(b-1)));
-                            assert(~isempty(samedur_seg_inds));
+                    if make_diffdur_comparisons
+                        diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                        for j = 1:n_longer_seg_durs(i)
+                            partiton_diffdur_seg_inds = intersect(diffdur_seg_inds{j}, segs_in_this_partition);
+                            assert(~isempty(partiton_diffdur_seg_inds));
+                            L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
+                            diffdur_seg_pairs{j} = [partiton_diffdur_seg_inds, partiton_diffdur_seg_inds];
                         end
                     end
                     
-                    % add to the count
-                    if q == 1
-                        L.n_total_segs(i,b) = L.n_total_segs(i,b) + length(samedur_seg_inds);
-                    end
+                    % perform correlation
+                    [L.splits_diff_context(:,i,q,p,s), L.splits_same_context(:,i,q,p,s), ...
+                        L.splits_same_context_err(:,i,q,p,s), L.splits_same_context_twogroups(:,i,q,p,s,:)] = ...
+                        cross_context_corr_helper(Y_seg, Y_embed_seg, ...
+                        samedur_order_pairs, diffdur_order_pairs, ...
+                        samecontext_rep_pairs, diffcontext_rep_pairs, ...
+                        samedur_seg_pairs, diffdur_seg_pairs, ...
+                        make_samedur_comparisons, make_diffdur_comparisons, ...
+                        I.interleave_samedur, I.interleave_diffdur, ...
+                        simfunc, tranweightfn, trancorrfn);
+                    clear samedur_seg_pairs diffdur_seg_pairs;
                     
-                    
-                    % optionally permute segment orders
-                    if b > 1 && I.nperms > 0
-                        xi = randperm(length(samedur_seg_inds));
-                        samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds(xi)];
-                        clear xi;
-                    else
-                        samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
-                    end
                 end
-                
-                %% Segs for different duration
-                
-                if make_diffdur_comparisons
-                    
-                    diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
-                    for j = 1:n_longer_seg_durs(i)
-                        
-                        diffdur_seg_inds = find(diffdur_valid_segs{i}(:,j));
-                        
-                        % optionally bootstrap segments
-                        if b > 1 && I.nbstraps>0
-                            error('Need to implement bootstrapping');
-                        end
-                        
-                        % select segments for different splits
-                        if b > 1 && I.nsplits > 1
-                            if ~isempty(diffdur_seg_inds)
-                                diffdur_seg_inds = intersect(diffdur_seg_inds, find(split_index==(b-1)));
-                                assert(~isempty(diffdur_seg_inds));
-                            end
-                        end
-                        
-                        % add to the count
-                        L.n_total_segs(i,b) = L.n_total_segs(i,b) + length(diffdur_seg_inds);
-                        
-                        % optionally permute segment orders
-                        if b > 1 && I.nperms>0
-                            xi = randperm(length(diffdur_seg_inds));
-                            diffdur_seg_pairs{j} = [diffdur_seg_inds, diffdur_seg_inds(xi)];
-                            clear xi;
-                        else
-                            diffdur_seg_pairs{j} = [diffdur_seg_inds, diffdur_seg_inds];
-                        end
-                    end
-                end
-                
-                %% Compare same duration segments
-                
-                if make_samedur_comparisons
-                    
-                    % weight by number of segments in the comparison
-                    weight = tranweightfn(size(samedur_seg_pairs,1));
-                    X = cell(1,2);
-                    for k = 1:size(samedur_order_pairs,2)
-                        p_orders = samedur_order_pairs(:,k);
-                        assert(p_orders(1)~=p_orders(2));
-                        
-                        % select segs to be compared
-                        X{1} = Y_seg(samedur_seg_pairs(:,1), :, p_orders(1), :);
-                        X{2} = Y_seg(samedur_seg_pairs(:,2), :, p_orders(2), :);
-                        assert(all(size(X{1})==size(X{2})));
-                        
-                        % optionally interleave values
-                        if I.interleave_samedur
-                            [X{1}, X{2}] = interleave_oddeven(X{1}, X{2});
-                        end
-                        
-                        % correlate pairs of repetitions
-                        for l = 1:size(diffcontext_rep_pairs,2)
-                            p_reps = diffcontext_rep_pairs(:,l);
-                            C = trancorrfn(simfunc(X{1}(:,:,1,p_reps(1)), X{2}(:,:,1,p_reps(2))));
-                            if all(~isnan(C))
-                                L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
-                                diff_context_weight = diff_context_weight + weight;
-                            end
-                        end
-                        
-                        % reliability of each element
-                        for l = 1:size(samecontext_rep_pairs,2)
-                            p_reps = samecontext_rep_pairs(:,l);
-                            for m = 1:2
-                                C = trancorrfn(simfunc(X{m}(:,:,1,p_reps(1)), X{m}(:,:,1,p_reps(2))));
-                                if all(~isnan(C))
-                                    L.same_context_twogroups(:,i,q,b,m) = L.same_context_twogroups(:,i,q,b,m) + C' * weight;
-                                    same_context_weight_twogroups(m) = same_context_weight_twogroups(m) + weight;
-                                end
-                            end
-                        end
-                    end
-                    clear X;
-                end
-                
-                %% Different duration
-                
-                if make_diffdur_comparisons
-                    X = cell(1,2);
-                    for j = 1:n_longer_seg_durs(i)
-                        weight = tranweightfn(size(diffdur_seg_pairs{j},1)); % standard error
-                        for k = 1:size(diffdur_order_pairs,2)
-                            p_orders = diffdur_order_pairs(:,k);
-                            
-                            % select segs to be compared
-                            X{1} = Y_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(1), :);
-                            X{2} = Y_embed_seg(diffdur_seg_pairs{j}(:,1), :, p_orders(2), :, j);
-                            if ~(all(size(X{1})==size(X{2})))
-                                keyboard;
-                            end
-                            
-                            % optionally interleave values
-                            if I.interleave_diffdur
-                                [X{1}, X{2}] = interleave_oddeven(X{1}, X{2});
-                            end
-                            
-                            % correlate pairs of repetitions
-                            for l = 1:size(diffcontext_rep_pairs,2)
-                                p_reps = diffcontext_rep_pairs(:,l);
-                                C = trancorrfn(simfunc(X{1}(:,:,1,p_reps(1)), X{2}(:,:,1,p_reps(2))));
-                                if all(~isnan(C))
-                                    L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b) + C' * weight;
-                                    diff_context_weight = diff_context_weight + weight;
-                                end
-                            end
-                            
-                            % reliability of each element
-                            for l = 1:size(samecontext_rep_pairs,2)
-                                p_reps = samecontext_rep_pairs(:,l);
-                                for m = 1:2
-                                    C = trancorrfn(simfunc(X{m}(:,:,1,p_reps(1)), X{m}(:,:,1,p_reps(2))));
-                                    if all(~isnan(C))
-                                        L.same_context_twogroups(:,i,q,b,m) = L.same_context_twogroups(:,i,q,b,m) + C' * weight;
-                                        same_context_weight_twogroups(m) = same_context_weight_twogroups(m) + weight;
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    clear X;
-                end
-                
-                %% Divide by weights, combine groups
-                
-                % divide by weights
-                L.same_context_twogroups(:,i,q,b,1) = L.same_context_twogroups(:,i,q,b,1)/same_context_weight_twogroups(1);
-                L.same_context_twogroups(:,i,q,b,2) = L.same_context_twogroups(:,i,q,b,2)/same_context_weight_twogroups(2);
-                L.diff_context(:,i,q,b) = L.diff_context(:,i,q,b)/diff_context_weight;
-                
-                % average and substract the two groups
-                L.same_context(:,i,q,b) = L.same_context_twogroups(:,i,q,b,1)/2 + L.same_context_twogroups(:,i,q,b,2)/2;
-                L.same_context_err(:,i,q,b) = (L.same_context_twogroups(:,i,q,b,1)/2 - L.same_context_twogroups(:,i,q,b,2)/2).^2;
-                
             end
         end
     end
@@ -829,20 +726,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     L.output_directory = [I.output_directory '/' param_string];
     L.rampwin = S.rampwin;
     L.rampdur = S.rampdur;
-    
-    % samples that correspond to different splits
-    if I.nsplits>1
-        L.splitsmps = (1:I.nsplits)+1;
-    end
-    
-    % bootstrapped error
-    if I.nbstraps>0
-        X = L.same_context(:,:,:,2:end);
-        Y = bsxfun(@minus, X, mean(X,4)).^2;
-        L.same_context_bstrap_err = mean(Y(:,:,:,:),4);
-        clear X Y;
-    end
-    
+   
     save(MAT_file, 'L');
     
 else
@@ -875,61 +759,38 @@ if I.plot_figure
             chname = ['ch' num2str(chan) '-' L.chnames{q}];
         end
         
-        % samples to plot
-        if I.plot_extra_smps
-            smps_to_plot = 1:n_smps;
-        else
-            smps_to_plot = 1;
-        end
-        for b = smps_to_plot
-            
-            % cross and same context correlations
-            diff_context = L.diff_context(:,:,:,b);
-            same_context = L.same_context(:,:,:,b);
-            
-            % plot
-            clf(I.figh);
-            set(I.figh, 'Position', [100, 100, 900, 900]);
-            if isnan(I.plot_range)
-                ti = L.lag_t >= I.plot_win(1) & L.lag_t <= I.plot_win(2);
-                X = cat(3, same_context(ti,:,q), diff_context(ti,:,q));
-                if any(ismember({'mae'}, I.simfunc))
-                    corr_range = quantile(X(X~=0), [0.01, 0.99]);
-                else
-                    corr_range = [-1 1] * max(X(:))*1.05;
-                end
-                clear ti X;
-            else
-                corr_range = I.plot_range;
-            end
-            for k = 1:n_seg_durs
-                subplot(4, 2, k);
-                X = [same_context(:,k,q), diff_context(:,k,q)];
-                plot(L.lag_t * 1000, X, 'LineWidth', 2);
-                hold on;
-                plot([0 0], corr_range, 'r--', 'LineWidth', 2);
-                plot(L.unique_segs(k)*[1 1], corr_range, 'r--', 'LineWidth', 2);
-                plot(I.plot_win * 1000, [0 0], 'k--', 'LineWidth', 2);
-                xlim(I.plot_win * 1000);
-                ylim(corr_range);
-                xlabel('Time Lag (ms)');
-                ylabel('Similarity');
-                title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
-                if k == 1
-                    legend('Same', 'Cross');
+        % string identifying temporal window
+        winstring = ['win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2))];
+       
+        % plot
+        corr_range  = plot_cross_context_corr(...
+            L.same_context(:,:,q), L.diff_context(:,:,q), L.unique_segs, L.lag_t, ...
+            I.plot_range, I.plot_win, I.simfunc, I.figh);
+        
+        % string identifying the correlation range
+        rangestring = ['range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
+        
+        % save
+        fname = [L.figure_directory '/cross-context-corr/' chname ...
+            '-' winstring '-' rangestring];
+        export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
+        export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
+        
+        % plot splits
+        if I.nsplits>0 && I.plot_splits
+            for s = 1:I.nsplits
+                for p = 1:I.npartitions
+                    corr_range = plot_cross_context_corr(...
+                        L.splits_same_context(:,:,q,p,s), L.splits_diff_context(:,:,q,p,s), L.unique_segs, L.lag_t, ...
+                        I.plot_range, I.plot_win, I.simfunc, I.figh);
+                    
+                    fname = [L.figure_directory '/cross-context-corr/' chname ...
+                        '-' winstring '-split' num2str(s) '-part' num2str(p) '-' rangestring];
+                    export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
+                    export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
                 end
             end
-            if b > 0
-                smpstr = ['-smp' num2str(b)];
-            else
-                smpstr = '';
-            end
-            fname = [L.figure_directory '/cross-context-corr/' chname ...
-                '-win' num2str(I.plot_win(1)) '-' num2str(I.plot_win(2)) ...
-                smpstr '-range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
-
-            export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
-            export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
         end
+        
     end
 end
