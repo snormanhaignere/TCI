@@ -381,22 +381,33 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         predictor_notrans(predictor_notrans<0) = 0;
                         predictor = tranpred(predictor_notrans);
                         
-                        M.diff_context_bestpred(:,k,q,s) = bsxfun(@times, predictor, M.same_context(:,k,q,s));
+                        M.diff_context_bestpred(:,k,q,s,l) = bsxfun(@times, predictor, M.same_context(:,k,q,s));
                     end
                 end
             end
         end
     end
     
+    % create a new sample that is the average of the split samples
+    if isfield(L, 'splitsmps')
+        M.best_loss = cat(2, M.best_loss, mean(M.best_loss(:,L.splitsmps,:),2));
+        M.best_intper_sec = cat(2, M.best_intper_sec, mean(M.best_intper_sec(:,L.splitsmps,:),2));
+        M.best_delay_sec_start = cat(2, M.best_delay_sec_start, mean(M.best_delay_sec_start(:,L.splitsmps,:),2));
+        M.best_delay_sec_median = cat(2, M.best_delay_sec_median, mean(M.best_delay_sec_median(:,L.splitsmps,:),2));
+        M.best_shape = cat(2, M.best_shape, mean(M.best_shape(:,L.splitsmps,:),2));
+
+        M.same_context = cat(4, M.same_context, mean(M.same_context(:,:,:,L.splitsmps,:),4));
+        M.diff_context = cat(4, M.diff_context, mean(M.diff_context(:,:,:,L.splitsmps,:),4));
+        M.diff_context_bestpred = cat(4, M.diff_context_bestpred, mean(M.diff_context_bestpred(:,:,:,L.splitsmps,:),4));
+        
+        M.loss = cat(5, M.loss, mean(M.loss(:,:,:,:,L.splitsmps,:),5));
+
+    end
+    
     % compute significance
     if I.nullsmps>0
         % -> null sample x channel by sample
         X = permute(M.best_loss, [3, 1, 2]);
-        
-        % average across splits
-        if isfield(L, 'splitsmps')
-            X = mean(X(:,:,L.splitsmps),3);
-        end
         
         % significance
         M.logP_gaussfit = sig_via_null_gaussfit(-X(1,:,:), -X(2:end,:,:));
@@ -440,8 +451,12 @@ if I.plot_figure
                     chname = ['ch' num2str(chan) '-' L.chnames{q}];
                 end
                 
-                if s > 1
-                    smpstr = ['_smp' num2str(s-1)];
+                if s > 1 
+                    if isfield(L, 'spitsmps') && s == n_smps
+                        smpstr = '_splitav';
+                    else
+                        smpstr = ['_smp' num2str(s-1)];
+                    end
                 else
                     smpstr = '';
                 end

@@ -24,5 +24,6 @@ toc;
 
 %% Model-fitting
 
-M = modelfit_cross_context_corr(L, 'overwrite', false, ...
-    'shape', [1,2,3,5], 'lossfn', 'unbiased-sqerr');
+L.splitsmps = 2:3;
+M = modelfit_cross_context_corr(L, 'overwrite', true, ...
+    'shape', 1, 'lossfn', 'unbiased-sqerr', 'nullsmps', 100);
