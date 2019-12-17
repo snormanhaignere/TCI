@@ -563,7 +563,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     L.same_context = zeros(n_lags, n_seg_durs, n_channels);
     L.same_context_err = zeros(n_lags, n_seg_durs, n_channels);
     L.diff_context = zeros(n_lags, n_seg_durs, n_channels);
-    L.n_total_segs = zeros(n_seg_durs);
+    L.n_total_segs = zeros(n_seg_durs, 1);
     if I.nsplits > 0
         L.splits_same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits, 2);
         L.splits_same_context = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits);
