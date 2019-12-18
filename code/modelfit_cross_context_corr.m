@@ -14,9 +14,6 @@ clear I;
 % corr: negative Pearson correlation
 I.lossfn = 'unbiased-sqerr';
 
-% how to estimate error if using unbiased squared error
-I.esterr = 'splithalf-mean';
-
 % distribution used to model the window
 % only 'gamma' allowed currently
 I.distr = 'gamma';
@@ -76,7 +73,10 @@ I.nullsmps = 0;
 I.skipnullpreds = true;
 
 % skip calculation of best predictors for extra samples
-I.skipsmppreds = ~isfield(L, 'splitsmps');
+I.skipsmppreds = ~isfield(L, 'splits_diff_context');
+
+% whether to skip cross-validated predictions
+I.skipcvpreds = false;
 
 % seed to create fixed random decision (e.g. for phase scrambling)
 I.randseed = 1;
@@ -106,7 +106,7 @@ I.linewidth = 2;
 I.ploterrquant = 0.3;
 
 % whether to plot bootstrapped samples
-I.plot_extrasmps = isfield(L, 'splitsmps');
+I.plot_splits = true;
 I.plot_nullsmps = false;
 
 % whether to run the analysis
@@ -134,7 +134,7 @@ end
 always_include = {'lossfn'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'linewidth', ...
-    'overwrite', 'ploterrquant', 'plot_extrasmps', 'plot_delaystat', 'plot_delay_range'};
+    'overwrite', 'ploterrquant', 'plot_splits', 'plot_delaystat', 'plot_delay_range'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
@@ -185,7 +185,7 @@ switch I.lossfn
         error('No matching loss for %s', I.lossfn);
 end
 
-[n_lags, n_seg, n_channels, n_smps] = size(L.same_context);
+[n_lags, n_seg, n_channels, ~] = size(L.same_context);
 assert(n_channels == length(L.channels));
 assert(length(L.unique_segs)==n_seg);
 assert(n_lags == length(L.lag_t))
@@ -197,48 +197,65 @@ if ~exist(MAT_file, 'file') || I.overwrite
     clear M;
     ResetRandStream2(I.randseed);
     
-    % error to use for noise correction
-    if strcmp(I.lossfn, 'unbiased-sqerr')
-        switch I.esterr
-            case 'bstrap'
-                M.same_context_err = L.same_context_bstrap_err;
-            case 'splithalf'
-                M.same_context_err = L.same_context_err;
-            case 'splithalf-mean'
-                M.same_context_err = mean(L.same_context_err,1);
-                M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.same_context_err)-1)]);
-            case 'neglag'
-                M.same_context_err = mean(L.diff_context(L.lag_t<0,:,:,:).^2,1);
-                M.same_context_err = repmat(M.same_context_err, [n_lags, ones(1,ndims(L.diff_context)-1)]);
-            case 'neglag-smps'
-                xi = randi(sum(L.lag_t<0), [n_lags,1]);
-                M.same_context_err = L.diff_context(xi, :, :, :).^2;
-            otherwise
-                error('No matching case for esterr=%s\n', I.esterr);
-        end
-    end
+    % assign relevant structures from L
+    M.diff_context = L.diff_context;
+    M.same_context = L.same_context;
+    M.same_context_err = L.same_context_err;
+    M.n_total_segs = L.n_total_segs;
     
-    % can optionally create null samples via phase scrambling
-    if I.nullsmps==0
-        M.same_context = L.same_context;
-        M.diff_context = L.diff_context;
-    else
+    % add splits to this same structure
+    % since were going to do the same thing
+    % for these splits, and its more efficient
+    % to do everything once
+    % data from splits are separated out at the end
+    if isfield(L, 'splits_diff_context')
+        [~, ~, ~, n_partitions, n_splits] = size(L.splits_diff_context);
+        split_smps = (1:(n_partitions*n_splits))+1;
+        d = [n_lags, n_seg, n_channels, n_partitions*n_splits];
+        M.diff_context = cat(4, M.diff_context, reshape(L.splits_diff_context, d));
+        M.same_context = cat(4, M.same_context, reshape(L.splits_same_context, d));
+        M.same_context_err = cat(4, M.same_context_err, reshape(L.splits_same_context_err, d));
+        M.n_total_segs = cat(2, M.n_total_segs, reshape(L.splits_n_total_segs, [n_seg, n_partitions*n_splits]));
+        clear d;
+    end
+    n_smps = size(M.diff_context,4);
+    
+    % optionally create null samples of cross-context correlation via phase
+    % scrambling, leave same context correlations unaltered by simply 
+    % repeating them over the null sample dimension
+    % again we append everything, now to a new fifth dimension
+    % to save computation time
+    if I.nullsmps>0
         diff_context_null = nan([n_lags, n_seg, n_channels, n_smps, I.nullsmps]);
         for i = 1:I.nullsmps
-            diff_context_null(:,:,:,:,i) = real(phasescram(L.diff_context));
+            diff_context_null(:,:,:,:,i) = real(phasescram(M.diff_context));
         end
-        M.diff_context = cat(5, L.diff_context, diff_context_null);
-        M.same_context = repmat(L.same_context, [1, 1, 1, 1, I.nullsmps+1]);
+        
+        %         keyboard
+        %         l = 4;
+        %         d = M.diff_context(:,l,2,13,1);
+        %         dn = squeeze(diff_context_null(:,l,2,13,2:3));
+        %         figure;
+        %         plot(L.lag_t, dn)
+        %         hold on;
+        %         plot(L.lag_t, d, 'k-', 'LineWidth', 3)
+        %         sum(d.^2)
+        %         sum(dn.^2)
+        
+        assert(size(M.diff_context,5)==1);
+        M.diff_context = cat(5, M.diff_context, diff_context_null);
+        M.same_context = repmat(M.same_context, [1, 1, 1, 1, I.nullsmps+1]);
         M.same_context_err = repmat(M.same_context_err, [1, 1, 1, 1, I.nullsmps+1]);
+        clear diff_context_null;
     end
     
     % valid segment durations
-    valid_seg_durs = find(L.n_total_segs(:,1)>0)';
+    valid_seg_durs = find(M.n_total_segs(:,1)>0)';
     n_valid_segdurs = length(valid_seg_durs);
     
     % segment dependent weights
-    % segdur x sample (i.e. for bootstrapping)
-    W_segs = tranweightnsegsfn(L.n_total_segs);
+    % segdur x data sample
+    W_segs = tranweightnsegsfn(M.n_total_segs);
     
     % reshape
     % lag x segment duration x channel x sample x null sample
@@ -320,6 +337,34 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     err = bsxfun(@times, same_context_err_format, X(:).^2);
                     M.loss(i,j,m,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format, err);
                 else
+                    %                     keyboard;
+                    %
+                    %                     %%
+                    %
+                    %                     figure;
+                    %                     imagesc(squeeze(diff_context_pred(:,2,13,:)*1e6));
+                    %                     colorbar;
+                    %
+                    %                     %%
+                    %
+                    %                     x = squeeze(sum(diff_context_format(1:100,2,13,:).^2))
+                    %
+                    %
+                    %                     %%
+                    %
+                    %                     e = x-y;
+                    %
+                    %
+                    %                     %%
+                    %
+                    %                     plot(W_total_format(:,2,13,1))
+                    %
+                    %                     %%
+                    %
+                    %                     figure;
+                    %                     imagesc(squeeze(E(1,2,:,:)))
+                    %
+                    %                     %%
                     M.loss(i,j,m,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
                 end
             end
@@ -327,7 +372,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
     end
     
     % find best prediction
-    M.diff_context_bestpred = nan(n_lags, n_seg, n_channels, (n_smps-1)*I.skipsmppreds+1, I.nullsmps*I.skipnullpreds+1);
+    M.diff_context_bestpred = nan(n_lags, n_seg, n_channels, (n_smps-1)*(~I.skipsmppreds)+1, I.nullsmps*(~I.skipnullpreds)+1);
     M.best_intper_sec = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_delay_sec_start = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_delay_sec_median = nan(n_channels, n_smps, I.nullsmps+1);
@@ -335,40 +380,24 @@ if ~exist(MAT_file, 'file') || I.overwrite
     M.best_loss = nan(n_channels, n_smps, I.nullsmps+1);
     for q = 1:n_channels
         for s = 1:n_smps
-            
-            % if using cross validation
-            % compute the best model using the mean of
-            % all other samples (from non-permuted data)
-            if isfield(L, 'splitsmps') && any(s == L.splitsmps) 
-                X = mean(M.loss(:,:,:,q,setdiff(L.splitsmps, s),1),4);
+            for l = 1:I.nullsmps+1
+                X = M.loss(:,:,:,q,s,l);
                 [~,xi] = min(X(:));
                 [a,b,c] = ind2sub(size(X), xi);
                 clear X;
-                splitsmp = true;
-            else
-                splitsmp = false;
-            end
-            
-            for l = 1:I.nullsmps+1
-                if ~splitsmp
-                    X = M.loss(:,:,:,q,s,l);
-                    [~,xi] = min(X(:));
-                    [a,b,c] = ind2sub(size(X), xi);
-                    splitsmp = true;
-                    clear X;
-                end
                 M.best_loss(q,s,l) = M.loss(a,b,c,q,s,l);
                 M.best_intper_sec(q,s,l) = M.intper_sec(a);
                 M.best_delay_sec_start(q,s,l) = M.delay_sec_start(b);
                 M.best_shape(q,s,l) = M.shape(c);
-                M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), M.best_shape(q,s), 'median');
+                M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s,l), M.best_delay_sec_start(q,s,l), M.best_shape(q,s,l), 'median');
+                clear a b c;
                 
                 % get prediction
                 if (l == 1 || ~I.skipnullpreds) && (s == 1 || ~I.skipsmppreds)
                     for k = valid_seg_durs
                         [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
-                            M.best_intper_sec(q,s), M.best_delay_sec_start(q,s), ...
-                            'shape', M.best_shape(q,s), 'tsec', L.lag_t, ...
+                            M.best_intper_sec(q,s,l), M.best_delay_sec_start(q,s,l), ...
+                            'shape', M.best_shape(q,s,l), 'tsec', L.lag_t, ...
                             'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                             'intervalmass', I.intervalmass, ...
                             'intervaltype', I.intervaltype, ...
@@ -381,38 +410,113 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         predictor_notrans(predictor_notrans<0) = 0;
                         predictor = tranpred(predictor_notrans);
                         
-                        M.diff_context_bestpred(:,k,q,s,l) = bsxfun(@times, predictor, M.same_context(:,k,q,s));
+                        M.diff_context_bestpred(:,k,q,s,l) = bsxfun(@times, predictor, M.same_context(:,k,q,s,l));
                     end
                 end
             end
         end
     end
     
-    % create a new sample that is the average of the split samples
-    if isfield(L, 'splitsmps')
-        M.best_loss = cat(2, M.best_loss, mean(M.best_loss(:,L.splitsmps,:),2));
-        M.best_intper_sec = cat(2, M.best_intper_sec, mean(M.best_intper_sec(:,L.splitsmps,:),2));
-        M.best_delay_sec_start = cat(2, M.best_delay_sec_start, mean(M.best_delay_sec_start(:,L.splitsmps,:),2));
-        M.best_delay_sec_median = cat(2, M.best_delay_sec_median, mean(M.best_delay_sec_median(:,L.splitsmps,:),2));
-        M.best_shape = cat(2, M.best_shape, mean(M.best_shape(:,L.splitsmps,:),2));
-
-        M.same_context = cat(4, M.same_context, mean(M.same_context(:,:,:,L.splitsmps,:),4));
-        M.diff_context = cat(4, M.diff_context, mean(M.diff_context(:,:,:,L.splitsmps,:),4));
-        M.diff_context_bestpred = cat(4, M.diff_context_bestpred, mean(M.diff_context_bestpred(:,:,:,L.splitsmps,:),4));
-        
-        M.loss = cat(5, M.loss, mean(M.loss(:,:,:,:,L.splitsmps,:),5));
-
+    % separate out null samples into a different field for clarity
+    if I.nullsmps>0
+        f = {'loss'};
+        M = split_dim_into_fields(M, f, 6, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+        f = {'diff_context', 'same_context', 'same_context_err'};
+        M = split_dim_into_fields(M, f, 5, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+        f = {'best_intper_sec', 'best_delay_sec_start', 'best_delay_sec_median', 'best_shape', 'best_loss'};
+        M = split_dim_into_fields(M, f, 3, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+        if ~I.skipnullpreds
+            f = {'diff_context_bestpred'};
+            M = split_dim_into_fields(M, f, 5, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+        end
     end
     
-    % compute significance
+    % compute significance using the null samples
+    % -> null sample x channel by sample
     if I.nullsmps>0
-        % -> null sample x channel by sample
-        X = permute(M.best_loss, [3, 1, 2]);
-        
-        % significance
-        M.logP_gaussfit = sig_via_null_gaussfit(-X(1,:,:), -X(2:end,:,:));
-        M.logP_counts = sig_via_null_gaussfit(-X(1,:,:), -X(2:end,:,:));
+        M.logP_gaussfit = sig_via_null_gaussfit(-M.best_loss, -permute(M.null_best_loss,[3,1,2]));
+        M.logP_counts = sig_via_null_counts(-M.best_loss, -permute(M.null_best_loss,[3,1,2]));
     end
+    
+    % separate out partitions/splits
+    if isfield(L, 'splits_diff_context')
+        f = {'loss'};
+        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
+        M = split_dim_into_fields(M, f, 5, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        f = {'diff_context', 'same_context', 'same_context_err'};
+        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
+        M = split_dim_into_fields(M, f, 4, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        f = {'best_intper_sec', 'best_delay_sec_start', 'best_delay_sec_median', 'best_shape', 'best_loss'};
+        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
+        M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        f = {'logP_gaussfit', 'logP_counts'};
+        M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        if ~I.skipsmppreds
+            f = {'diff_context_bestpred'};
+            if I.nullsmps>0 && ~I.skipnullpreds; f = [f, strcat('null_', f)]; end
+            M = split_dim_into_fields(M, f, 4, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        end
+    end
+    
+    % cross-validated loss and significance using independent partitions
+    if isfield(L, 'splits_diff_context')
+        if ~I.skipcvpreds
+            M.cv_diff_context_bestpred = nan(n_lags, n_seg, n_channels, n_partitions, n_splits);
+        end
+        M.cv_loss = nan(n_channels, n_partitions, n_splits);
+        if I.nullsmps>0
+            M.null_cv_loss = nan(n_channels, n_partitions, n_splits, I.nullsmps);
+        end
+        for q = 1:n_channels
+            for s = 1:n_splits
+                for p = 1:n_partitions
+                    X = mean(M.splits_loss(:,:,:,q,setdiff(1:n_partitions,p),s),5);
+                    [~,xi] = min(X(:));
+                    [a,b,c] = ind2sub(size(X), xi);
+                    M.cv_loss(q, p, s) = M.splits_loss(a,b,c,q,p,s);
+                    if I.nullsmps>0
+                        M.null_cv_loss(q, p, s, :) = M.splits_null_loss(a,b,c,q,p,s,:);
+                    end
+                    
+                    if ~I.skipcvpreds
+                        for k = valid_seg_durs
+                            [winpow, ~, overlap] = win_power_ratio(L.unique_segs(k)/1000, I.distr, ...
+                                M.intper_sec(a), M.delay_sec_start(b), ...
+                                'shape', M.shape(c), 'tsec', L.lag_t, ...
+                                'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                                'intervalmass', I.intervalmass, ...
+                                'intervaltype', I.intervaltype, ...
+                                'delaypoint', 'start');
+                            if I.winpowratio
+                                predictor_notrans = winpow;
+                            else
+                                predictor_notrans = overlap;
+                            end
+                            predictor_notrans(predictor_notrans<0) = 0;
+                            predictor = tranpred(predictor_notrans);
+                            
+                            M.cv_diff_context_bestpred(:,k,q,p,s) = bsxfun(@times, predictor, M.splits_same_context(:,k,q,p,s));
+                        end
+                    end
+                    clear a b c X;
+                    
+                end
+            end
+        end
+        
+        % average across partitions and splits
+        M.av_cv_loss = mean(mean(M.cv_loss, 2),3);
+        if I.nullsmps>0
+            M.av_null_cv_loss = squeeze_dims(mean(mean(M.null_cv_loss, 2), 3), [2,3]);
+        end
+        
+        % compute significance
+        if I.nullsmps>0
+            M.cv_logP_gaussfit = sig_via_null_gaussfit(-M.av_cv_loss, -M.av_null_cv_loss');
+            M.cv_logP_counts = sig_via_null_counts(-M.av_cv_loss, -M.av_null_cv_loss');
+        end
+    end
+    
     
     M.channels = L.channels;
     
@@ -435,148 +539,213 @@ if I.plot_figure
         I.figh = figure;
     end
     
-    plot_win_string = [num2str(I.plot_win(1)) '-' num2str(I.plot_win(2))];
-    
-    n_smps = size(M.diff_context,4);
     n_channels = length(L.channels);
     for q = 1:n_channels
-        for s = 1:((n_smps-1)*I.plot_extrasmps+1)
-            for b = 1:(I.nullsmps*I.plot_nullsmps+1)
-                
-                chan = L.channels(q);
-                
-                if strcmp(L.chnames{q}, ['ch' num2str(chan)])
-                    chname = L.chnames{q};
+        
+        % channel name
+        chan = L.channels(q);
+        if strcmp(L.chnames{q}, ['ch' num2str(chan)])
+            chname = L.chnames{q};
+        else
+            chname = ['ch' num2str(chan) '-' L.chnames{q}];
+        end
+        
+        % plot
+        aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t,...
+            I.plot_win, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
+        fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
+        plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
+            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), M.best_shape(q), fname, aux_args{:})
+
+        % plot null samples
+        if I.nullsmps>0 && I.plot_nullsmps
+            for l = 1:I.nullsmps
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-nullsmp' num2str(l)]);
+                if ~I.skipnullpreds
+                    null_diff_context_bestpred = M.null_diff_context_bestpred(:,:,q,l);
                 else
-                    chname = ['ch' num2str(chan) '-' L.chnames{q}];
+                    null_diff_context_bestpred = [];
                 end
-                
-                if s > 1 
-                    if isfield(L, 'spitsmps') && s == n_smps
-                        smpstr = '_splitav';
+                plot_modelfit(M.null_diff_context(:,:,q,l), M.null_same_context(:,:,q,l), null_diff_context_bestpred, ...
+                    M.null_loss(:,:,M.null_best_shape(q)==M.shape,q,l), M.null_best_intper_sec(q,l), ...
+                    M.null_best_delay_sec_median(q,l), M.null_best_shape(q,l), fname, aux_args{:})
+            end
+        end
+        
+        % plot splits
+        if I.plot_splits
+            [~, n_partitions, n_splits] = size(M.splits_best_intper_sec);
+            for s = 1:n_splits
+                for p = 1:n_partitions
+                    if ~I.skipcvpreds
+                        cv_diff_context_bestpred = M.cv_diff_context_bestpred(:,:,q,p,s);
                     else
-                        smpstr = ['_smp' num2str(s-1)];
+                        cv_diff_context_bestpred = [];
                     end
-                else
-                    smpstr = '';
-                end
-                
-                if b > 1
-                    nullstr = ['_null' num2str(b-1)];
-                else
-                    nullstr = '';
-                end
-                
-                % plot prediction for best delay, lineplot
-                if (s == 1 || ~I.skipsmppreds) && (b == 1 || ~I.skipnullpreds)
-                    
-                    clf(I.figh);
-                    set(I.figh, 'Position', [100, 100, 900, 900]);
-                    
-                    X = M.diff_context(:,:,q,s,b);
-                    corr_range = quantile(X(:), [0.01, 0.99]);
-                    clear X;
-                    invariance_line = NaN;
-                    valid_seg_durs = find(L.n_total_segs(:,1)>0)';
-                    for k = valid_seg_durs
-                        subplot(4, 2, k);
-                        hold on;
-                        plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', I.linewidth);
-                        h1 = plot(L.lag_t * 1000, M.same_context(:,k,q,s,b), 'LineWidth', I.linewidth);
-                        h2 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s,b), 'LineWidth', I.linewidth);
-                        h3 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s,b), 'LineWidth', I.linewidth);
-                        plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', I.linewidth);
-                        if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
-                        xlim(I.plot_win * 1000);
-                        ylim(corr_range);
-                        xlabel('Time Lag (ms)');
-                        ylabel('Pearson Correlation');
-                        title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
-                        if k == 1
-                            legend([h1, h2, h3], 'Same', 'Cross', 'Model');
-                        end
-                        box off;
-                    end
-                    fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr nullstr]);
-                    % print_wrapper([fname '.png']);
-                    % print_wrapper([fname '.pdf']);
-                    export_fig([fname '.pdf'], '-pdf', '-transparent');
-                    export_fig([fname '.png'], '-png', '-transparent', '-r150');
-                    savefig(I.figh, [fname '.fig']);
-                    
-                    % plot prediction for best delay, image
-                    clf(I.figh);
-                    set(I.figh, 'Position', [100, 100, 900, 600]);
-                    subplot(2,1,1);
-                    imagesc(M.diff_context(:,:,q,s,b)', corr_range(2) * [-1, 1]);
-                    subplot(2,1,2);
-                    imagesc(M.diff_context_bestpred(:,:,q,s,b)', corr_range(2) * [-1, 1]);
-                    for i = 1:2
-                        subplot(2,1,i);
-                        colorbar;
-                        colormap(flipud(cbrewer('div', 'RdBu', 128)));
-                        set(gca, 'YTick', 1:length(L.unique_segs), 'YTickLabel', L.unique_segs);
-                        xticks = get(gca, 'XTick');
-                        set(gca, 'XTick', xticks, 'XTickLabel', L.lag_t(xticks)*1000);
-                        ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
-                        if i == 2
-                            title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s,b)*1000, M.best_delay_sec_median(q,s,b)*1000));
-                        end
-                    end
-                    fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr nullstr]);
-                    % print_wrapper([fname '.png']);
-                    export_fig([fname '.png'], '-png', '-transparent', '-r150');
-                    savefig(I.figh, [fname '.fig']);
-                end
-                
-                % delays to plot
-                X_start_delays = M.loss(:,:,M.best_shape(q,s,b)==M.shape,q,s,b);
-                if ~strcmp(I.plot_delaystat, 'start')
-                    delay_sec_altstat = nan(size(X_start_delays));
-                    for l = 1:length(M.intper_sec)
-                        delay_sec_altstat(l,:) = modelwin_convert_delay(M.intper_sec(l), M.delay_sec_start, M.best_shape(q,s,b), I.plot_delaystat);
-                    end
-                    delays_to_plot = I.plot_delay_range(1):I.delay_interval:I.plot_delay_range(2);
-                    X_altdelays = nan(length(M.intper_sec), length(delays_to_plot));
-                    for l = 1:length(M.intper_sec)
-                        xi = delays_to_plot > delay_sec_altstat(l,1) & delays_to_plot < delay_sec_altstat(l,end);
-                        X_altdelays(l,xi) = interp1(delay_sec_altstat(l,:), X_start_delays(l,:), delays_to_plot(xi));
-                    end
-                    X_altdelays(isnan(X_altdelays)) = inf;
-                    X = X_altdelays;
-                else
-                    X = X_start_delays;
-                end
-                
-                % plot the error vs. parameters
-                cmap = flipud(cbrewer('seq', 'Reds', 128));
-                [minX,zi] = min(X(:));
-                [~, xi] = ind2sub(size(X), zi);
-                bounds = [minX, quantile(X(:,xi), I.ploterrquant)];
-                clear xi zi;
-                % bounds = quantile(-X(:), [1-I.ploterrquant, 1]);
-                if ~all(isnan(X(:)))
-                    clf(I.figh);
-                    set(I.figh, 'Position', [100, 100, 600, 600]);
-                    imagesc(X, bounds);
-                    colormap(cmap);
-                    colorbar;
-                    yticks = unique(round(linspace(1, length(M.intper_sec), 5)));
-                    set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
-                    % ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
-                    % set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
-                    xticks = unique(round(linspace(1, length(delays_to_plot), 5)));
-                    set(gca, 'XTick', xticks, 'XTickLabel', 1000*delays_to_plot(xticks));
-                    xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
-                    title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s,b)*1000, M.best_delay_sec_median(q,s,b)*1000));
-                    set(gca, 'FontSize', 12);
-                    fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error-delay-' I.plot_delaystat smpstr nullstr]);
-                    % print_wrapper([fname '.png']);
-                    export_fig([fname '.png'], '-png', '-transparent', '-r150');
-                    savefig(I.figh, [fname '.fig']);
-                    % clear X;
+                    fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
+                        chname '-split' num2str(s) '-p' num2str(p)]);
+                    plot_modelfit(M.splits_diff_context(:,:,q,p,s), M.splits_same_context(:,:,q,p,s), cv_diff_context_bestpred, ...
+                        M.splits_loss(:,:,M.best_shape(q)==M.shape,q,p,s), M.splits_best_intper_sec(q,p,s), ...
+                        M.splits_best_delay_sec_median(q,p,s), M.splits_best_shape(q,p,s), fname, aux_args{:})
+                    %                     if I.nullsmps>0 && I.plot_nullsmps
+                    %                         for l = 1:I.nullsmps
+                    %                             if ~I.skipsmppreds && ~I.skipnullpreds
+                    %                                 splits_null_diff_context_bestpred = M.splits_null_diff_context_bestpred(:,:,q,p,s,l);
+                    %                             else
+                    %                                 splits_null_diff_context_bestpred = [];
+                    %                             end
+                    %                             fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
+                    %                                 chname '-split' num2str(s) '-p' num2str(p) '-nullsmp' num2str(l)]);
+                    %                             plot_modelfit(M.splits_null_diff_context(:,:,q,p,s,l), M.splits_null_same_context(:,:,q,p,s,l), splits_null_diff_context_bestpred, ...
+                    %                                 M.splits_null_loss(:,:,M.best_shape(q)==M.shape,q,p,s,l), M.splits_null_best_intper_sec(q,p,s,l), ...
+                    %                                 M.splits_null_best_delay_sec_median(q,p,s,l), M.splits_null_best_shape(q,p,s,l), fname, aux_args{:})
+                    %
+                    %                         end
+                    %                     end
                 end
             end
         end
+                
+        
+        %%
+        %
+        %         for s = 1:((n_smps-1)*I.plot_extrasmps+1)
+        %             for b = 1:(I.nullsmps*I.plot_nullsmps+1)
+        %
+        %                 chan = L.channels(q);
+        %
+        %                 if strcmp(L.chnames{q}, ['ch' num2str(chan)])
+        %                     chname = L.chnames{q};
+        %                 else
+        %                     chname = ['ch' num2str(chan) '-' L.chnames{q}];
+        %                 end
+        %
+        %                 if s > 1
+        %                     if isfield(L, 'spitsmps') && s == n_smps
+        %                         smpstr = '_splitav';
+        %                     else
+        %                         smpstr = ['_smp' num2str(s-1)];
+        %                     end
+        %                 else
+        %                     smpstr = '';
+        %                 end
+        %
+        %                 if b > 1
+        %                     nullstr = ['_null' num2str(b-1)];
+        %                 else
+        %                     nullstr = '';
+        %                 end
+        %
+        %                 % plot prediction for best delay, lineplot
+        %                 if (s == 1 || ~I.skipsmppreds) && (b == 1 || ~I.skipnullpreds)
+        %
+        %                     clf(I.figh);
+        %                     set(I.figh, 'Position', [100, 100, 900, 900]);
+        %
+        %                     X = M.diff_context(:,:,q,s,b);
+        %                     corr_range = quantile(X(:), [0.01, 0.99]);
+        %                     clear X;
+        %                     invariance_line = NaN;
+        %                     valid_seg_durs = find(L.n_total_segs(:,1)>0)';
+        %                     for k = valid_seg_durs
+        %                         subplot(4, 2, k);
+        %                         hold on;
+        %                         plot(L.lag_t([1 end]) * 1000, [0,0], 'k--', 'LineWidth', I.linewidth);
+        %                         h1 = plot(L.lag_t * 1000, M.same_context(:,k,q,s,b), 'LineWidth', I.linewidth);
+        %                         h2 = plot(L.lag_t * 1000, M.diff_context(:,k,q,s,b), 'LineWidth', I.linewidth);
+        %                         h3 = plot(L.lag_t * 1000, M.diff_context_bestpred(:,k,q,s,b), 'LineWidth', I.linewidth);
+        %                         plot(L.unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', I.linewidth);
+        %                         if ~isnan(invariance_line); plot(I.plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
+        %                         xlim(I.plot_win * 1000);
+        %                         ylim(corr_range);
+        %                         xlabel('Time Lag (ms)');
+        %                         ylabel('Pearson Correlation');
+        %                         title(sprintf('Seg: %.0f ms', L.unique_segs(k)))
+        %                         if k == 1
+        %                             legend([h1, h2, h3], 'Same', 'Cross', 'Model');
+        %                         end
+        %                         box off;
+        %                     end
+        %                     fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction-lineplot_plotwin' plot_win_string smpstr nullstr]);
+        %                     % print_wrapper([fname '.png']);
+        %                     % print_wrapper([fname '.pdf']);
+        %                     export_fig([fname '.pdf'], '-pdf', '-transparent');
+        %                     export_fig([fname '.png'], '-png', '-transparent', '-r150');
+        %                     savefig(I.figh, [fname '.fig']);
+        %
+        %                     % plot prediction for best delay, image
+        %                     clf(I.figh);
+        %                     set(I.figh, 'Position', [100, 100, 900, 600]);
+        %                     subplot(2,1,1);
+        %                     imagesc(M.diff_context(:,:,q,s,b)', corr_range(2) * [-1, 1]);
+        %                     subplot(2,1,2);
+        %                     imagesc(M.diff_context_bestpred(:,:,q,s,b)', corr_range(2) * [-1, 1]);
+        %                     for i = 1:2
+        %                         subplot(2,1,i);
+        %                         colorbar;
+        %                         colormap(flipud(cbrewer('div', 'RdBu', 128)));
+        %                         set(gca, 'YTick', 1:length(L.unique_segs), 'YTickLabel', L.unique_segs);
+        %                         xticks = get(gca, 'XTick');
+        %                         set(gca, 'XTick', xticks, 'XTickLabel', L.lag_t(xticks)*1000);
+        %                         ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
+        %                         if i == 2
+        %                             title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s,b)*1000, M.best_delay_sec_median(q,s,b)*1000));
+        %                         end
+        %                     end
+        %                     fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-prediction_plotwin' plot_win_string smpstr nullstr]);
+        %                     % print_wrapper([fname '.png']);
+        %                     export_fig([fname '.png'], '-png', '-transparent', '-r150');
+        %                     savefig(I.figh, [fname '.fig']);
+        %                 end
+        %
+        %                 % delays to plot
+        %                 X_start_delays = M.loss(:,:,M.best_shape(q,s,b)==M.shape,q,s,b);
+        %                 if ~strcmp(I.plot_delaystat, 'start')
+        %                     delay_sec_altstat = nan(size(X_start_delays));
+        %                     for l = 1:length(M.intper_sec)
+        %                         delay_sec_altstat(l,:) = modelwin_convert_delay(M.intper_sec(l), M.delay_sec_start, M.best_shape(q,s,b), I.plot_delaystat);
+        %                     end
+        %                     delays_to_plot = I.plot_delay_range(1):I.delay_interval:I.plot_delay_range(2);
+        %                     X_altdelays = nan(length(M.intper_sec), length(delays_to_plot));
+        %                     for l = 1:length(M.intper_sec)
+        %                         xi = delays_to_plot > delay_sec_altstat(l,1) & delays_to_plot < delay_sec_altstat(l,end);
+        %                         X_altdelays(l,xi) = interp1(delay_sec_altstat(l,:), X_start_delays(l,:), delays_to_plot(xi));
+        %                     end
+        %                     X_altdelays(isnan(X_altdelays)) = inf;
+        %                     X = X_altdelays;
+        %                 else
+        %                     X = X_start_delays;
+        %                 end
+        %
+        %                 % plot the error vs. parameters
+        %                 cmap = flipud(cbrewer('seq', 'Reds', 128));
+        %                 [minX,zi] = min(X(:));
+        %                 [~, xi] = ind2sub(size(X), zi);
+        %                 bounds = [minX, quantile(X(:,xi), I.ploterrquant)];
+        %                 clear xi zi;
+        %                 % bounds = quantile(-X(:), [1-I.ploterrquant, 1]);
+        %                 if ~all(isnan(X(:)))
+        %                     clf(I.figh);
+        %                     set(I.figh, 'Position', [100, 100, 600, 600]);
+        %                     imagesc(X, bounds);
+        %                     colormap(cmap);
+        %                     colorbar;
+        %                     yticks = unique(round(linspace(1, length(M.intper_sec), 5)));
+        %                     set(gca, 'YTick', yticks, 'YTickLabel', 1000*M.intper_sec(yticks));
+        %                     % ytick = interp1(log2(M.intper_sec), 1:length(M.intper_sec), log2(M.intper_sec));
+        %                     % set(gca, 'YTick', ytick, 'YTickLabel', M.intper_sec*1000);
+        %                     xticks = unique(round(linspace(1, length(delays_to_plot), 5)));
+        %                     set(gca, 'XTick', xticks, 'XTickLabel', 1000*delays_to_plot(xticks));
+        %                     xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
+        %                     title(sprintf('rf=%.f ms, delay=%.f ms', M.best_intper_sec(q,s,b)*1000, M.best_delay_sec_median(q,s,b)*1000));
+        %                     set(gca, 'FontSize', 12);
+        %                     fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname '-model-error-delay-' I.plot_delaystat smpstr nullstr]);
+        %                     % print_wrapper([fname '.png']);
+        %                     export_fig([fname '.png'], '-png', '-transparent', '-r150');
+        %                     savefig(I.figh, [fname '.fig']);
+        %                     % clear X;
+        %                 end
+        %             end
+        %         end
     end
 end
