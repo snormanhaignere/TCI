@@ -1,6 +1,6 @@
 function plot_modelfit(diff_context, same_context, diff_context_bestpred, ...
     loss_best_model, best_intper_sec, best_delay_sec_median, best_shape, fname_global, ...
-    intper_sec, delay_sec_start, unique_segs, lag_t,...
+    intper_sec, delay_sec_start, unique_segs, lag_t,  intervaltype, intervalmass, ...
     plot_win, plot_smoothwin, plot_delaystat, plot_delay_range, ploterrquant, linewidth, figh)
 
 corr_range = quantile(diff_context(:), [0.01, 0.99]);
@@ -29,6 +29,7 @@ if ~isempty(diff_context_bestpred)
         h1 = plot(lag_t * 1000, same_context(:,k), 'LineWidth', linewidth);
         h2 = plot(lag_t * 1000, diff_context(:,k), 'LineWidth', linewidth);
         h3 = plot(lag_t * 1000, diff_context_bestpred(:,k), 'LineWidth', linewidth);
+        plot(0*[1 1], corr_range, 'k--', 'LineWidth', linewidth);
         plot(unique_segs(k)*[1 1], corr_range, 'k--', 'LineWidth', linewidth);
         if ~isnan(invariance_line); plot(plot_win * 1000, invariance_line*[1 1], 'k--', 'LineWidth', 2); end
         xlim(plot_win * 1000);
@@ -76,7 +77,9 @@ X_start_delays = loss_best_model;
 if ~strcmp(plot_delaystat, 'start')
     delay_sec_altstat = nan(size(X_start_delays));
     for l = 1:length(intper_sec)
-        delay_sec_altstat(l,:) = modelwin_convert_delay(intper_sec(l), delay_sec_start, best_shape, plot_delaystat);
+        delay_sec_altstat(l,:) = modelwin_convert_delay(intper_sec(l), ...
+            delay_sec_start, best_shape, plot_delaystat, ...
+            'intervaltype', intervaltype, 'intervalmass', intervalmass);
     end
     delays_to_plot = plot_delay_range(1):diff(delay_sec_start(1:2)):plot_delay_range(2);
     X_altdelays = nan(length(intper_sec), length(delays_to_plot));

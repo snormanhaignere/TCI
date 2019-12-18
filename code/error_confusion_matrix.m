@@ -1,6 +1,7 @@
 % Computes matrix of confusions between models
 %
 % 2019-12-2: Created, Sam NH
+
 clear I;
 I.sr = 100;
 I.distr = 'gamma';
@@ -11,7 +12,7 @@ I.segdur_range = [1/32, 1/2];
 I.intper_range = [1/32, 1/2];
 I.nintper = 20;
 I.delay_interval = 1/I.sr;
-I.delay_range = [-1/4, 1/4];
+I.delay_range = [0, 1/4];
 I.rampwin = 'hann';
 I.rampdur = 1/32;
 I.weight = true;
@@ -52,11 +53,6 @@ end
 
 Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*I.sr));
 
-% dims = size(Y_model_with_delays);
-% Y_model_with_delays_rs = reshape(Y_model_with_delays, [dims(1:end-1), 1, dims(end)]);
-
-
-
 %%
 
 Ypow = squeeze_dims(sum(sum(bsxfun(@times, Y_model.^2, weights),1),2),[1,2]);
@@ -80,12 +76,14 @@ end
 %%
 figure;
 i = 15;
-j = 1;
+j = 3;
 l = 5;
 bounds = quantile(M.loss(:,j,i,j), [0 0.5]);
 imagesc(flipud(M.loss(:,:,i,j)), bounds);
 set(gca, 'YTick', 1:length(M.intper_sec), 'YTickLabel', fliplr(M.intper_sec)*1000);
 % plot(log2(M.intper_sec), M.loss(:,10))
+
+%%
 
 figure;
 n_rows = round(sqrt(n_seg_durs));

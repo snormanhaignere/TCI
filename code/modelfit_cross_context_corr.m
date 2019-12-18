@@ -59,7 +59,7 @@ I.shape = [1,2,3,5];
 % whether to use the power ratio between
 % segments to predict the correlation
 I.winpowratio = true;
-I.powexp = 2;
+I.corrfac = 0;
 
 % whether to transform the weighting applied to segments
 I.tranweightnsegs = 'none'; % applied to total segs
@@ -313,7 +313,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                     'intervalmass', I.intervalmass, ...
                     'intervaltype', I.intervaltype, ...
-                    'delaypoint', 'start',  'powexp', I.powexp);
+                    'delaypoint', 'start',  'corrfac', I.corrfac);
                 if I.winpowratio
                     predictor_notrans = winpow;
                 else
@@ -393,7 +393,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 M.best_intper_sec(q,s,l) = M.intper_sec(a);
                 M.best_delay_sec_start(q,s,l) = M.delay_sec_start(b);
                 M.best_shape(q,s,l) = M.shape(c);
-                M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s,l), M.best_delay_sec_start(q,s,l), M.best_shape(q,s,l), 'median');
+                M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s,l), ...
+                    M.best_delay_sec_start(q,s,l), M.best_shape(q,s,l), 'median', ...
+                    'intervaltype', I.intervaltype, 'intervalmass', I.intervalmass);
                 clear a b c;
                 
                 % get prediction
@@ -405,7 +407,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                             'intervalmass', I.intervalmass, ...
                             'intervaltype', I.intervaltype, ...
-                            'delaypoint', 'start', 'powexp', I.powexp);
+                            'delaypoint', 'start', 'corrfac', I.corrfac);
                         if I.winpowratio
                             predictor_notrans = winpow;
                         else
@@ -492,7 +494,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                                 'intervalmass', I.intervalmass, ...
                                 'intervaltype', I.intervaltype, ...
-                                'delaypoint', 'start', 'powexp', I.powexp);
+                                'delaypoint', 'start', 'corrfac', I.corrfac);
                             if I.winpowratio
                                 predictor_notrans = winpow;
                             else
@@ -557,7 +559,7 @@ if I.plot_figure
         end
         
         % plot
-        aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t,...
+        aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t, I.intervaltype, I.intervalmass, ...
             I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
         fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
         plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
