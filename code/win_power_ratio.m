@@ -33,6 +33,9 @@ I.intervaltype = 'center';
 I.rampwin = 'none';
 I.rampdur = 0;
 
+% exponent used to compute power
+I.powexp = 2;
+
 % can optionally plot result
 I.plot = false;
 
@@ -58,7 +61,7 @@ shifts = (-N_delays:N_delays)*segdur_smps;
 h_delayed = add_delays(h, shifts);
 
 % normalize by summed power across filters
-h_relpower = bsxfun(@times, h.^2, 1./sum(h_delayed.^2,2));
+h_relpower = bsxfun(@times, h.^I.powexp, 1./sum(h_delayed.^I.powexp,2));
 
 %% Interpolate
 

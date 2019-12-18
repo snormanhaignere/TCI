@@ -265,6 +265,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
             end
         end
         clear o1 o2 new_pair;
+    else
+        samedur_order_pairs = [];
     end
     
     %% Pairs of orders for different duration comparisons
@@ -281,6 +283,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
             end
         end
         clear o1 o2 new_pair;
+    else
+        diffdur_order_pairs = [];
     end
     
     %% Pairs of repetitions for same vs. different context comparisons
@@ -585,6 +589,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 continue;
             end
             
+            if n_segs_per_scramstim(i)==1
+                continue;
+            end
+            
             fprintf('Seg duration: %.0f\n', L.unique_segs(i)); drawnow;
             
             % non-embedded segments
@@ -623,6 +631,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         clear X ti targ_times;
                     end
                 end
+            else
+                Y_embed_seg = [];
             end
             
             %% Pick out valid segments
@@ -631,6 +641,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 samedur_seg_inds = find(samedur_valid_segs{i});
                 L.n_total_segs(i) = L.n_total_segs(i) + length(samedur_seg_inds);
                 samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
+            else
+                samedur_seg_pairs = [];
             end
             
             if make_diffdur_comparisons
@@ -641,6 +653,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     L.n_total_segs(i) = L.n_total_segs(i) + length(diffdur_seg_inds{j});
                     diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
                 end
+            else
+                diffdur_seg_pairs = [];
             end
             
             %% Perform correlation analysis
@@ -689,6 +703,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         assert(~isempty(partition_samedur_seg_inds));
                         L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
                         samedur_seg_pairs = [partition_samedur_seg_inds, partition_samedur_seg_inds];
+                    else
+                        samedur_seg_pairs = [];
                     end
                     if make_diffdur_comparisons
                         diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
@@ -698,6 +714,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
                             diffdur_seg_pairs{j} = [partiton_diffdur_seg_inds, partiton_diffdur_seg_inds];
                         end
+                    else
+                        diffdur_seg_pairs = [];
                     end
                     
                     % perform correlation

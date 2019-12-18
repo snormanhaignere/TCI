@@ -59,6 +59,7 @@ I.shape = [1,2,3,5];
 % whether to use the power ratio between
 % segments to predict the correlation
 I.winpowratio = true;
+I.powexp = 2;
 
 % whether to transform the weighting applied to segments
 I.tranweightnsegs = 'none'; % applied to total segs
@@ -99,6 +100,9 @@ I.plot_figure = true;
 % window used for plotting
 I.plot_win = L.lag_t([1 end]); % in seconds
 
+% smoothing window for plotting
+I.plot_smoothwin = 0;
+
 % line width for plotting
 I.linewidth = 2;
 
@@ -133,7 +137,7 @@ end
 % string with modeling parameters
 always_include = {'lossfn'};
 always_exclude = {...
-    'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'linewidth', ...
+    'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'plot_smoothwin', 'linewidth', ...
     'overwrite', 'ploterrquant', 'plot_splits', 'plot_delaystat', 'plot_delay_range'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
@@ -309,7 +313,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                     'intervalmass', I.intervalmass, ...
                     'intervaltype', I.intervaltype, ...
-                    'delaypoint', 'start');
+                    'delaypoint', 'start',  'powexp', I.powexp);
                 if I.winpowratio
                     predictor_notrans = winpow;
                 else
@@ -401,7 +405,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                             'intervalmass', I.intervalmass, ...
                             'intervaltype', I.intervaltype, ...
-                            'delaypoint', 'start');
+                            'delaypoint', 'start', 'powexp', I.powexp);
                         if I.winpowratio
                             predictor_notrans = winpow;
                         else
@@ -449,8 +453,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
         f = {'best_intper_sec', 'best_delay_sec_start', 'best_delay_sec_median', 'best_shape', 'best_loss'};
         if I.nullsmps>0; f = [f, strcat('null_', f)]; end
         M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
-        f = {'logP_gaussfit', 'logP_counts'};
-        M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        if I.nullsmps>0
+            f = {'logP_gaussfit', 'logP_counts'};
+            M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+        end
         if ~I.skipsmppreds
             f = {'diff_context_bestpred'};
             if I.nullsmps>0 && ~I.skipnullpreds; f = [f, strcat('null_', f)]; end
@@ -486,7 +492,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                                 'intervalmass', I.intervalmass, ...
                                 'intervaltype', I.intervaltype, ...
-                                'delaypoint', 'start');
+                                'delaypoint', 'start', 'powexp', I.powexp);
                             if I.winpowratio
                                 predictor_notrans = winpow;
                             else
@@ -552,10 +558,11 @@ if I.plot_figure
         
         % plot
         aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t,...
-            I.plot_win, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
+            I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
         fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
         plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
-            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), M.best_shape(q), fname, aux_args{:})
+            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
+            M.best_shape(q), fname, aux_args{:})
 
         % plot null samples
         if I.nullsmps>0 && I.plot_nullsmps

@@ -1,9 +1,18 @@
 function plot_modelfit(diff_context, same_context, diff_context_bestpred, ...
     loss_best_model, best_intper_sec, best_delay_sec_median, best_shape, fname_global, ...
     intper_sec, delay_sec_start, unique_segs, lag_t,...
-    plot_win, plot_delaystat, plot_delay_range, ploterrquant, linewidth, figh)
+    plot_win, plot_smoothwin, plot_delaystat, plot_delay_range, ploterrquant, linewidth, figh)
 
 corr_range = quantile(diff_context(:), [0.01, 0.99]);
+
+win_string = sprintf('-win-%d-%dms', round(plot_win(1)*1000), round(plot_win(2)*1000));
+
+if plot_smoothwin>0    
+    same_context = mysmooth(same_context, 1/diff(lag_t(1:2)), plot_smoothwin*1000);
+    diff_context = mysmooth(diff_context, 1/diff(lag_t(1:2)), plot_smoothwin*1000);
+    diff_context_bestpred = mysmooth(diff_context_bestpred, 1/diff(lag_t(1:2)), plot_smoothwin*1000);
+    win_string = [win_string sprintf('-smooth-%dms', round(plot_smoothwin*1000))];
+end
 
 % plot prediction for best delay, lineplot
 if ~isempty(diff_context_bestpred)
@@ -32,7 +41,7 @@ if ~isempty(diff_context_bestpred)
         end
         box off;
     end
-    fname = [fname_global '-prediction-lineplot'];
+    fname = [fname_global '-prediction-lineplot' win_string];
     export_fig([fname '.pdf'], '-pdf', '-transparent');
     export_fig([fname '.png'], '-png', '-transparent', '-r150');
     savefig(figh, [fname '.fig']);
@@ -56,7 +65,7 @@ if ~isempty(diff_context_bestpred)
             title(sprintf('rf=%.f ms, delay=%.f ms', best_intper_sec*1000, best_delay_sec_median*1000));
         end
     end
-    fname = [fname_global '-prediction-image'];
+    fname = [fname_global '-prediction-image' win_string];
     export_fig([fname '.png'], '-png', '-transparent', '-r150');
     savefig(figh, [fname '.fig']);
     
