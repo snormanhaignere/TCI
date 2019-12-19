@@ -110,7 +110,7 @@ I.linewidth = 2;
 I.ploterrquant = 0.3;
 
 % whether to plot bootstrapped samples
-I.plot_splits = true;
+I.plot_splits = isfield(L, 'splits_diff_context');
 I.plot_nullsmps = false;
 
 % whether to run the analysis
