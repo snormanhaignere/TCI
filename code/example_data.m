@@ -15,11 +15,10 @@ tic;
 root_directory = '/Users/svnh2/Desktop/projects';
 addpath([root_directory '/general-analysis-code']);
 addpath([root_directory '/export_fig_v3']);
-directory_to_save_results = [TCI_directory '/results/v2'];
+directory_to_save_results = [TCI_directory '/results/v3'];
 L = cross_context_corr(D, t, S, 'chnames', chnames, ...
     'output_directory', directory_to_save_results, 'boundary', 'any', ...
-    'overwrite', false, 'plot_figure', true, 'lag_win', [0, 4], 'npartitions', 2, 'nsplits', 2, ...
-    'splitbysource', true, 'plot_splits', true);
+    'overwrite', false, 'plot_figure', true, 'lag_win', [0, 4]);
 toc;
 
 %% Model-fitting

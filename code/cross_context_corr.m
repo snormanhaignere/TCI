@@ -672,64 +672,65 @@ if ~exist(MAT_file, 'file') || I.overwrite
             
             %% Splits analysis
             
-            % break segments into chunks
-            N = n_segs_per_scramstim(i);
-            assert(N==length(samedur_valid_segs{i}))
-            if I.splitbysource
-                chunk_index = source_labels{i}(:)-1;
-            else
-                chunk_size = N/n_chunks_for_splits;
-                chunk_index = floor((0:N-1)/(chunk_size));
-                clear chunk_size;
-            end
-            assert((chunk_index(end)+1)==n_chunks_for_splits);
-            clear N;
-            
-            for s = 1:I.nsplits
+            if I.nsplits>0
+                % break segments into chunks
+                N = n_segs_per_scramstim(i);
+                assert(N==length(samedur_valid_segs{i}))
+                if I.splitbysource
+                    chunk_index = source_labels{i}(:)-1;
+                else
+                    chunk_size = N/n_chunks_for_splits;
+                    chunk_index = floor((0:N-1)/(chunk_size));
+                    clear chunk_size;
+                end
+                assert((chunk_index(end)+1)==n_chunks_for_splits);
+                clear N;
                 
-                % optionally randomize chunks
-                % then assign chunks to partitions
-                chunk_index_remap = chunk_mapping_for_splits(chunk_index+1,s)-1;
-                partition_index = mod(chunk_index_remap, I.npartitions)+1;
-                clear chunk_index_remap;
-                
-                for p = 1:I.npartitions
+                for s = 1:I.nsplits
                     
-                    segs_in_this_partition = find(partition_index==p);
+                    % optionally randomize chunks
+                    % then assign chunks to partitions
+                    chunk_index_remap = chunk_mapping_for_splits(chunk_index+1,s)-1;
+                    partition_index = mod(chunk_index_remap, I.npartitions)+1;
+                    clear chunk_index_remap;
                     
-                    % Select segments in each partition
-                    if make_samedur_comparisons
-                        partition_samedur_seg_inds = intersect(samedur_seg_inds, segs_in_this_partition);
-                        assert(~isempty(partition_samedur_seg_inds));
-                        L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
-                        samedur_seg_pairs = [partition_samedur_seg_inds, partition_samedur_seg_inds];
-                    else
-                        samedur_seg_pairs = [];
-                    end
-                    if make_diffdur_comparisons
-                        diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
-                        for j = 1:n_longer_seg_durs(i)
-                            partiton_diffdur_seg_inds = intersect(diffdur_seg_inds{j}, segs_in_this_partition);
-                            assert(~isempty(partiton_diffdur_seg_inds));
-                            L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
-                            diffdur_seg_pairs{j} = [partiton_diffdur_seg_inds, partiton_diffdur_seg_inds];
+                    for p = 1:I.npartitions
+                        
+                        segs_in_this_partition = find(partition_index==p);
+                        
+                        % Select segments in each partition
+                        if make_samedur_comparisons
+                            partition_samedur_seg_inds = intersect(samedur_seg_inds, segs_in_this_partition);
+                            assert(~isempty(partition_samedur_seg_inds));
+                            L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
+                            samedur_seg_pairs = [partition_samedur_seg_inds, partition_samedur_seg_inds];
+                        else
+                            samedur_seg_pairs = [];
                         end
-                    else
-                        diffdur_seg_pairs = [];
+                        if make_diffdur_comparisons
+                            diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                            for j = 1:n_longer_seg_durs(i)
+                                partiton_diffdur_seg_inds = intersect(diffdur_seg_inds{j}, segs_in_this_partition);
+                                assert(~isempty(partiton_diffdur_seg_inds));
+                                L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
+                                diffdur_seg_pairs{j} = [partiton_diffdur_seg_inds, partiton_diffdur_seg_inds];
+                            end
+                        else
+                            diffdur_seg_pairs = [];
+                        end
+                        
+                        % perform correlation
+                        [L.splits_diff_context(:,i,q,p,s), L.splits_same_context(:,i,q,p,s), ...
+                            L.splits_same_context_err(:,i,q,p,s), L.splits_same_context_twogroups(:,i,q,p,s,:)] = ...
+                            cross_context_corr_helper(Y_seg, Y_embed_seg, ...
+                            samedur_order_pairs, diffdur_order_pairs, ...
+                            samecontext_rep_pairs, diffcontext_rep_pairs, ...
+                            samedur_seg_pairs, diffdur_seg_pairs, ...
+                            make_samedur_comparisons, make_diffdur_comparisons, ...
+                            I.interleave_samedur, I.interleave_diffdur, ...
+                            simfunc, tranweightfn, trancorrfn);
+                        clear samedur_seg_pairs diffdur_seg_pairs;
                     end
-                    
-                    % perform correlation
-                    [L.splits_diff_context(:,i,q,p,s), L.splits_same_context(:,i,q,p,s), ...
-                        L.splits_same_context_err(:,i,q,p,s), L.splits_same_context_twogroups(:,i,q,p,s,:)] = ...
-                        cross_context_corr_helper(Y_seg, Y_embed_seg, ...
-                        samedur_order_pairs, diffdur_order_pairs, ...
-                        samecontext_rep_pairs, diffcontext_rep_pairs, ...
-                        samedur_seg_pairs, diffdur_seg_pairs, ...
-                        make_samedur_comparisons, make_diffdur_comparisons, ...
-                        I.interleave_samedur, I.interleave_diffdur, ...
-                        simfunc, tranweightfn, trancorrfn);
-                    clear samedur_seg_pairs diffdur_seg_pairs;
-                    
                 end
             end
         end
