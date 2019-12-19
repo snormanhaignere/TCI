@@ -42,7 +42,7 @@ I.simfunc = 'corr';
 I.channels = 1:size(D,3);
 
 % whether to interleave shorter and longer segments
-I.interleave_diffdur = true;
+I.interleave_diffdur = false;
 
 % whether to interleave segments of different orders but the same duration
 I.interleave_samedur = false;
