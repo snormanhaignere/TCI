@@ -537,6 +537,8 @@ else
 end
 
 M.param_string_modelfit = param_string_modelfit;
+M.intervaltype = I.intervaltype;
+M.intervalmass = I.intervalmass;
 
 %% Plot the results
 

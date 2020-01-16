@@ -162,7 +162,7 @@ switch distr
         
         % gamma distribution
         if I.cdf
-            h = gamcdf((t_win_sec-c)/r, a, b);
+            h = gamcdf((t_sec-c)/r, a, b);
         else
             h = gampdf((t_sec-c)/r, a, b);
         end
@@ -170,7 +170,9 @@ switch distr
             assert(~I.cdf)
             h(t_sec < 0) = 0;
         end
-        h = h / sum(h);
+        if ~I.cdf
+            h = h / sum(h);
+        end
         
     otherwise
         error('No matching distribution');

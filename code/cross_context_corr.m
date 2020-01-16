@@ -675,7 +675,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
             if I.nsplits>0
                 % break segments into chunks
                 N = n_segs_per_scramstim(i);
-                assert(N==length(samedur_valid_segs{i}))
+                if make_samedur_comparisons
+                    assert(N==length(samedur_valid_segs{i}));
+                end
                 if I.splitbysource
                     chunk_index = source_labels{i}(:)-1;
                 else
