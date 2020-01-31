@@ -102,6 +102,14 @@ I.splitrand = true;
 I.splitbysource = false;
 I.plot_splits = false;
 
+% bootstrap resampling
+I.nbstrap = 0;
+I.plot_bstrap = false;
+
+% jack-knife resampling
+I.jack = false;
+I.plot_jack = false;
+
 % random seed, only relevant for random processes
 % (e.g. permutation testing or bootstrapping)
 I.randseed = 1;
@@ -149,7 +157,7 @@ always_include = {'boundary','lag_win'};
 always_exclude = {...
     'plot_win', 'plot_figure', 'plot_range', ...
     'keyboard', 'overwrite', 'output_directory', 'figure_directory', ...
-    'chnames', 'run', 'figh', 'plot_splits'};
+    'chnames', 'run', 'figh', 'plot_splits', 'plot_bstrap', 'plot_jack'};
 param_string = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % MAT file to save results to
@@ -575,6 +583,20 @@ if ~exist(MAT_file, 'file') || I.overwrite
         L.splits_diff_context = zeros(n_lags, n_seg_durs, n_channels, I.npartitions, I.nsplits);
         L.splits_n_total_segs = zeros(n_seg_durs, I.npartitions, I.nsplits);
     end
+    if I.nbstrap > 0
+        L.bstrap_same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, 2, I.nbstrap);
+        L.bstrap_same_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstrap);
+        L.bstrap_same_context_err = zeros(n_lags, n_seg_durs, n_channels, I.nbstrap);
+        L.bstrap_diff_context = zeros(n_lags, n_seg_durs, n_channels, I.nbstrap);
+        L.bstrap_n_total_segs = zeros(n_seg_durs, I.nbstrap);
+    end
+    if I.jack
+        L.jack_same_context_twogroups = zeros(n_lags, n_seg_durs, n_channels, 2, n_sourcestim);
+        L.jack_same_context = zeros(n_lags, n_seg_durs, n_channels, n_sourcestim);
+        L.jack_same_context_err = zeros(n_lags, n_seg_durs, n_channels, n_sourcestim);
+        L.jack_diff_context = zeros(n_lags, n_seg_durs, n_channels, n_sourcestim);
+        L.jack_n_total_segs = zeros(n_seg_durs, n_sourcestim);
+    end
     for q = 1:n_channels % analysis is done separately for every channel to save memory
         
         chan = I.channels(q);
@@ -643,7 +665,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
             
             if make_samedur_comparisons
                 samedur_seg_inds = find(samedur_valid_segs{i});
-                L.n_total_segs(i) = L.n_total_segs(i) + length(samedur_seg_inds);
+                if q == 1
+                    L.n_total_segs(i) = L.n_total_segs(i) + length(samedur_seg_inds);
+                end
                 samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
             else
                 samedur_seg_pairs = [];
@@ -654,7 +678,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
                 for j = 1:n_longer_seg_durs(i)
                     diffdur_seg_inds{j} = find(diffdur_valid_segs{i}(:,j));
-                    L.n_total_segs(i) = L.n_total_segs(i) + length(diffdur_seg_inds{j});
+                    if q == 1
+                        L.n_total_segs(i) = L.n_total_segs(i) + length(diffdur_seg_inds{j});
+                    end
                     diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
                 end
             else
@@ -673,6 +699,122 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 I.interleave_samedur, I.interleave_diffdur, ...
                 simfunc, tranweightfn, trancorrfn);
             clear samedur_seg_pairs diffdur_seg_pairs;
+            
+            %% Bootstrapping analysis
+            
+            try
+                if I.nbstrap>0
+                    
+                    assert(numel(source_labels{i})==size(samedur_valid_segs{i},1));
+                    if ~isempty(diffdur_valid_segs{i})
+                        assert(numel(source_labels{i})==size(diffdur_valid_segs{i},1));
+                    end
+                    bstrap_smps = randi(n_sourcestim, [n_sourcestim, I.nbstrap]);
+                    for b = 1:I.nbstrap
+                        
+                        source_smps = bstrap_smps(:,b);
+                        
+                        if make_samedur_comparisons
+                            samedur_seg_inds = [];
+                            for l = 1:n_sourcestim
+                                samedur_seg_inds = [samedur_seg_inds; ...
+                                    find(samedur_valid_segs{i} & source_labels{i}(:)==source_smps(l))]; %#ok<AGROW>
+                            end
+                            if q == 1
+                                L.bstrap_n_total_segs(i) = L.bstrap_n_total_segs(i) + length(samedur_seg_inds);
+                            end
+                            samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
+                        else
+                            samedur_seg_pairs = [];
+                        end
+                        
+                        if make_diffdur_comparisons
+                            diffdur_seg_inds = cell(1, n_longer_seg_durs(i));
+                            diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                            for j = 1:n_longer_seg_durs(i)
+                                diffdur_seg_inds{j} = [];
+                                for l = 1:n_sourcestim
+                                    diffdur_seg_inds{j} = [diffdur_seg_inds{j}; ...
+                                        find(diffdur_valid_segs{i}(:,j) & source_labels{i}(:)==source_smps(l))];
+                                end
+                                if q == 1
+                                    L.bstrap_n_total_segs(i) = L.bstrap_n_total_segs(i) + length(diffdur_seg_inds{j});
+                                end
+                                diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
+                            end
+                        else
+                            diffdur_seg_pairs = [];
+                        end
+                        
+                        [L.bstrap_diff_context(:,i,q,b), L.bstrap_same_context(:,i,q,b), ...
+                            L.bstrap_same_context_err(:,i,q,b), L.bstrap_same_context_twogroups(:,i,q,:,b)] = ...
+                            cross_context_corr_helper(Y_seg, Y_embed_seg, ...
+                            samedur_order_pairs, diffdur_order_pairs, ...
+                            samecontext_rep_pairs, diffcontext_rep_pairs, ...
+                            samedur_seg_pairs, diffdur_seg_pairs, ...
+                            make_samedur_comparisons, make_diffdur_comparisons, ...
+                            I.interleave_samedur, I.interleave_diffdur, ...
+                            simfunc, tranweightfn, trancorrfn);
+                        clear samedur_seg_pairs diffdur_seg_pairs;
+                    end
+                end
+            catch
+                keyboard
+            end
+            
+            %% Jack-knife
+            
+            if I.jack
+                
+                try
+                    assert(all(unique(source_labels{i}(:))==(1:n_sourcestim)'));
+                    assert(numel(source_labels{i})==size(samedur_valid_segs{i},1));
+                    if ~isempty(diffdur_valid_segs{i})
+                        assert(numel(source_labels{i})==size(diffdur_valid_segs{i},1));
+                    end
+                    for k = 1:n_sourcestim
+                        
+                        if make_samedur_comparisons
+                            samedur_seg_inds = find(samedur_valid_segs{i} & ~ismember(source_labels{i}(:),k));
+                            if q == 1
+                                L.jack_n_total_segs(i) = L.jack_n_total_segs(i) + length(samedur_seg_inds);
+                            end
+                            samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
+                        else
+                            samedur_seg_pairs = [];
+                        end
+                        
+                        if make_diffdur_comparisons
+                            diffdur_seg_inds = cell(1, n_longer_seg_durs(i));
+                            diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
+                            for j = 1:n_longer_seg_durs(i)
+                                diffdur_seg_inds{j} = [diffdur_seg_inds{j}; ...
+                                    find(diffdur_valid_segs{i}(:,j) & ~ismember(source_labels{i}(:),k))];
+                                if q == 1
+                                    L.jack_n_total_segs(i) = L.jack_n_total_segs(i) + length(diffdur_seg_inds{j});
+                                end
+                                diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
+                            end
+                        else
+                            diffdur_seg_pairs = [];
+                        end
+                        
+                        [L.jack_diff_context(:,i,q,k), L.jack_same_context(:,i,q,k), ...
+                            L.jack_same_context_err(:,i,q,k), L.jack_same_context_twogroups(:,i,q,:,k)] = ...
+                            cross_context_corr_helper(Y_seg, Y_embed_seg, ...
+                            samedur_order_pairs, diffdur_order_pairs, ...
+                            samecontext_rep_pairs, diffcontext_rep_pairs, ...
+                            samedur_seg_pairs, diffdur_seg_pairs, ...
+                            make_samedur_comparisons, make_diffdur_comparisons, ...
+                            I.interleave_samedur, I.interleave_diffdur, ...
+                            simfunc, tranweightfn, trancorrfn);
+                        clear samedur_seg_pairs diffdur_seg_pairs;
+                        
+                    end
+                catch
+                    keyboard
+                end
+            end
             
             %% Splits analysis
             
@@ -708,7 +850,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         if make_samedur_comparisons
                             partition_samedur_seg_inds = intersect(samedur_seg_inds, segs_in_this_partition);
                             assert(~isempty(partition_samedur_seg_inds));
-                            L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
+                            if q == 1
+                                L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partition_samedur_seg_inds);
+                            end
                             samedur_seg_pairs = [partition_samedur_seg_inds, partition_samedur_seg_inds];
                         else
                             samedur_seg_pairs = [];
@@ -718,7 +862,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             for j = 1:n_longer_seg_durs(i)
                                 partiton_diffdur_seg_inds = intersect(diffdur_seg_inds{j}, segs_in_this_partition);
                                 assert(~isempty(partiton_diffdur_seg_inds));
-                                L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
+                                if q == 1
+                                    L.splits_n_total_segs(i,p,s) = L.splits_n_total_segs(i,p,s) + length(partiton_diffdur_seg_inds);
+                                end
                                 diffdur_seg_pairs{j} = [partiton_diffdur_seg_inds, partiton_diffdur_seg_inds];
                             end
                         else
@@ -808,7 +954,7 @@ if I.plot_figure
                     corr_range = plot_cross_context_corr(...
                         L.splits_same_context(:,:,q,p,s), L.splits_diff_context(:,:,q,p,s), L.unique_segs, L.lag_t, ...
                         I.plot_range, I.plot_win, I.simfunc, I.figh);
-                    
+                    rangestring = ['range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
                     fname = [L.figure_directory '/cross-context-corr/' chname ...
                         '-' winstring '-split' num2str(s) '-part' num2str(p) '-' rangestring];
                     export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
@@ -817,5 +963,33 @@ if I.plot_figure
             end
         end
         
+        % plot bootstraps
+        if I.nbstrap>0 && I.plot_bstrap
+            for b = 1:I.nbstrap
+                corr_range = plot_cross_context_corr(...
+                    L.bstrap_same_context(:,:,q,b), L.bstrap_diff_context(:,:,q,b), L.unique_segs, L.lag_t, ...
+                    I.plot_range, I.plot_win, I.simfunc, I.figh);
+                rangestring = ['range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
+                fname = [L.figure_directory '/cross-context-corr/' chname ...
+                    '-' winstring '-bstrap' num2str(b) '-' rangestring];
+                export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
+                export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
+            end
+        end
+        
+        % plot jack-knife
+        if I.jack && I.plot_bstrap
+            n_sourcestim = size(L.jack_same_context,4);
+            for k = 1:n_sourcestim
+                corr_range = plot_cross_context_corr(...
+                    L.jack_same_context(:,:,q,k), L.jack_diff_context(:,:,q,k), L.unique_segs, L.lag_t, ...
+                    I.plot_range, I.plot_win, I.simfunc, I.figh);
+                rangestring = ['range' num2str(corr_range(1), '%.2f') '-' num2str(corr_range(2), '%.2f')];
+                fname = [L.figure_directory '/cross-context-corr/' chname ...
+                    '-' winstring '-jack' num2str(k) '-' rangestring];
+                export_fig(mkpdir([fname '.pdf']), '-pdf', '-transparent');
+                export_fig(mkpdir([fname '.png']), '-png', '-transparent', '-r150');
+            end
+        end
     end
 end
