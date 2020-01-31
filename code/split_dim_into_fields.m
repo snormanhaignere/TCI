@@ -1,35 +1,27 @@
-function M_new = split_dim_into_fields(M, f_orig, dim, split1, split2, f_new1, f_new2, split1_rs, split2_rs, squeeze_split1, squeeze_split2)
+function M_new = split_dim_into_fields(M, f_orig, dim, splits, f_new, varargin)
 
-% Helper function for modelfit_cross_context_corr.m
-% 
-% 2019-12-17: Created Sam NH
+clear I;
+I.shapes = {};
+I.squeeze = false(0);
+I = parse_optInputs_keyvalue(varargin, I);
 
+% original dimensionality
+d = size(M.(f_orig));
 
-
-% checks
-assert(length(f_orig)==length(f_new1));
-assert(length(f_orig)==length(f_new2));
-
+assert(length(splits)==length(f_new));
+assert(all(unique(cat(2, splits{:}))==(1:size(M.(f_orig), dim))));
 M_new = M;
-for i = 1:length(f_orig)
-    d = size(M.(f_orig{i}));
-    if nargin < 8 || isempty(split1_rs)
-        d_rs1 = [d(1:dim-1), length(split1), d(dim+1:end)]; 
+for j = 1:length(splits)
+    if isempty(I.shapes)
+        M_new.(f_new{j}) = index(M.(f_orig), dim, splits{j});
     else
-        d_rs1 = [d(1:dim-1), split1_rs, d(dim+1:end)];
+        assert(length(I.shapes)==length(splits));
+        M_new.(f_new{j}) = reshape(...
+            index(M.(f_orig), dim, splits{j}), ...
+            [d(1:dim-1), I.shapes{j}, d(dim+1:end)]);
     end
-    if nargin < 9 || isempty(split1_rs)
-        d_rs2 = [d(1:dim-1), length(split2), d(dim+1:end)]; 
-    else
-        d_rs2 = [d(1:dim-1), split2_rs, d(dim+1:end)];
-    end
-    M_new.(f_new1{i}) = reshape(index(M.(f_orig{i}), dim, split1), d_rs1);
-    M_new.(f_new2{i}) = reshape(index(M.(f_orig{i}), dim, split2), d_rs2);
-    if nargin >= 10 && squeeze_split1 && length(split1)==1
-        M_new.(f_new1{i}) = squeeze_dims(M_new.(f_new1{i}), dim);
-    end
-    if nargin >= 11 && squeeze_split2 && length(split2)==1
-        M_new.(f_new2{i}) = squeeze_dims(M_new.(f_new2{i}), dim);
+    if ~isempty(I.squeeze) && I.squeeze(j)
+        assert(length(I.squeeze)==length(splits));
+        M_new.(f_new{j}) = squeeze_dims(M_new.(f_new{j}), dim);
     end
 end
-clear M;

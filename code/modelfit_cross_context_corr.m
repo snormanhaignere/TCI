@@ -109,8 +109,10 @@ I.linewidth = 2;
 % quantile of error map to plot
 I.ploterrquant = 0.3;
 
-% whether to plot bootstrapped samples
+% whether to plot splits or resamples
 I.plot_splits = isfield(L, 'splits_diff_context');
+I.plot_bstrap = false;
+I.plot_jack = false;
 I.plot_nullsmps = false;
 
 % directory to save output to
@@ -142,7 +144,7 @@ always_include = {'lossfn'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'plot_smoothwin', 'linewidth', ...
     'overwrite', 'ploterrquant', 'plot_splits', 'plot_delaystat', 'plot_delay_range', ...
-    'output_directory'};
+    'output_directory', 'plot_bstrap', 'plot_jack'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
@@ -226,10 +228,30 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.n_total_segs = cat(2, M.n_total_segs, reshape(L.splits_n_total_segs, [n_seg, n_partitions*n_splits]));
         clear d;
     end
+    
+    % add bootstraps to the same structure
+    if isfield(L, 'bstrap_diff_context')
+        n_bstrap = size(L.bstrap_diff_context,4);
+        bstrap_smps = (1:n_bstrap)+size(M.diff_context,4);
+        M.diff_context = cat(4, M.diff_context, L.bstrap_diff_context);
+        M.same_context = cat(4, M.same_context, L.bstrap_same_context);
+        M.same_context_err = cat(4, M.same_context_err, L.bstrap_same_context_err);
+        M.n_total_segs = cat(2, M.n_total_segs, L.bstrap_n_total_segs);
+    end
+    
+    % add jack-knife to the same structure
+    if isfield(L, 'jack_diff_context')
+        n_jack = size(L.jack_diff_context,4);
+        jack_smps = (1:n_jack)+size(M.diff_context,4);
+        M.diff_context = cat(4, M.diff_context, L.jack_diff_context);
+        M.same_context = cat(4, M.same_context, L.jack_same_context);
+        M.same_context_err = cat(4, M.same_context_err, L.jack_same_context_err);
+        M.n_total_segs = cat(2, M.n_total_segs, L.jack_n_total_segs);
+    end
     n_smps = size(M.diff_context,4);
     
     % optionally create null samples of cross-context correlation via phase
-    % scrambling, leave same context correlations unaltered by simply 
+    % scrambling, leave same context correlations unaltered by simply
     % repeating them over the null sample dimension
     % again we append everything, now to a new fifth dimension
     % to save computation time
@@ -429,15 +451,18 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % separate out null samples into a different field for clarity
     if I.nullsmps>0
-        f = {'loss'};
-        M = split_dim_into_fields(M, f, 6, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
-        f = {'diff_context', 'same_context', 'same_context_err'};
-        M = split_dim_into_fields(M, f, 5, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
-        f = {'best_intper_sec', 'best_delay_sec_start', 'best_delay_sec_median', 'best_shape', 'best_loss'};
-        M = split_dim_into_fields(M, f, 3, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+        fa = {...
+            'loss', 6; ...
+            'diff_context', 5; 'same_context', 5; 'same_context_err', 5; ...
+            'best_intper_sec', 3; 'best_delay_sec_start', 3; 'best_delay_sec_median', 3; 'best_shape', 3; 'best_loss', 3; ...
+            };
         if ~I.skipnullpreds
-            f = {'diff_context_bestpred'};
-            M = split_dim_into_fields(M, f, 5, 1, (1:I.nullsmps)+1, f, strcat('null_', f));
+            fa = cat(1, fa, {'diff_context_bestpred'; 5});
+        end
+        for j = 1:length(fa)
+            f = fa{j,1};
+            dim = fa{j,2};
+            M = split_dim_into_fields(M, f, dim, {1, (1:I.nullsmps)+1}, [{f}, strcat('null_', {f})]);
         end
     end
     
@@ -448,26 +473,54 @@ if ~exist(MAT_file, 'file') || I.overwrite
         M.logP_counts = sig_via_null_counts(-M.best_loss, -permute(M.null_best_loss,[3,1,2]));
     end
     
-    % separate out partitions/splits
-    if isfield(L, 'splits_diff_context')
-        f = {'loss'};
-        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
-        M = split_dim_into_fields(M, f, 5, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
-        f = {'diff_context', 'same_context', 'same_context_err'};
-        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
-        M = split_dim_into_fields(M, f, 4, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
-        f = {'best_intper_sec', 'best_delay_sec_start', 'best_delay_sec_median', 'best_shape', 'best_loss'};
-        if I.nullsmps>0; f = [f, strcat('null_', f)]; end
-        M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+    % separate out partitions/splits, bootstraps, and jack-knifes
+    if n_smps > 1
+        smp_groups = {};
+        prefixes = {};
+        shapes = {};
+        if isfield(L, 'splits_diff_context')
+            smp_groups = [smp_groups, {split_smps}];
+            prefixes = [prefixes, {'splits_'}];
+            shapes = [shapes, {[n_partitions, n_splits]}];
+        end
+        if isfield(L, 'bstrap_diff_context')
+            smp_groups = [smp_groups, {bstrap_smps}];
+            prefixes = [prefixes, {'bstrap_'}];
+            shapes = [shapes, {n_bstrap}];
+        end
+        if isfield(L, 'jack_diff_context')
+            smp_groups = [smp_groups, {jack_smps}];
+            prefixes = [prefixes, {'jack_'}];
+            shapes = [shapes, {n_jack}];
+        end
+        
+        % fields and dimensions to separate out
+        fa = {...
+            'loss', 5; ...
+            'diff_context', 4; 'same_context', 4; 'same_context_err', 4; ...
+            'best_intper_sec', 2; 'best_delay_sec_start', 2; 'best_delay_sec_median', 2; 'best_shape', 2; 'best_loss', 2; ...
+            };
+
         if I.nullsmps>0
-            f = {'logP_gaussfit', 'logP_counts'};
-            M = split_dim_into_fields(M, f, 2, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+            n_f = length(fa);
+            for i = 1:n_f
+                fa = cat(1, fa, {['null_' fa{i,1}], fa{i, 2}});
+            end
+            fa = cat(1, fa, {'logP_gaussfit', 2; 'logP_counts', 2});
         end
         if ~I.skipsmppreds
-            f = {'diff_context_bestpred'};
-            if I.nullsmps>0 && ~I.skipnullpreds; f = [f, strcat('null_', f)]; end
-            M = split_dim_into_fields(M, f, 4, 1, split_smps, f, strcat('splits_', f), 1, [n_partitions, n_splits], true, false);
+            fa = cat(1, fa, {'diff_context_bestpred', 4});
+            if ~I.skipnullpreds
+                fa = cat(1, fa, {'null_diff_context_bestpred', 4});
+            end
         end
+        for j = 1:length(fa)
+            f = fa{j,1};
+            dim = fa{j,2};
+            M = split_dim_into_fields(M, f, dim, [{1}, smp_groups], [{f}, strcat(prefixes, f)], ...
+                'shapes', [1, shapes], 'squeeze', [true, false(1, length(shapes))]);
+        end
+
     end
     
     % cross-validated loss and significance using independent partitions
@@ -565,13 +618,17 @@ if I.plot_figure
         end
         
         % plot
-        aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t, I.intervaltype, I.intervalmass, ...
-            I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
-        fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
-        plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
-            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
-            M.best_shape(q), fname, aux_args{:})
-
+        try
+            aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t, I.intervaltype, I.intervalmass, ...
+                I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
+            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
+            plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
+                M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
+                M.best_shape(q), fname, aux_args{:})
+        catch
+            keyboard
+        end
+        
         % plot null samples
         if I.nullsmps>0 && I.plot_nullsmps
             for l = 1:I.nullsmps
@@ -620,7 +677,42 @@ if I.plot_figure
                 end
             end
         end
-                
+        
+        
+        
+        % plot bootstraps
+        if I.plot_bstrap
+            n_bstrap = size(M.bstrap_diff_context,4);
+            for b = 1:n_bstrap
+                if ~I.skipsmppreds
+                    bstrap_diff_context_bestpred = M.bstrap_diff_context_bestpred(:,:,q,b);
+                else
+                    bstrap_diff_context_bestpred = [];
+                end
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
+                    chname '-bstrap' num2str(b)]);
+                plot_modelfit(M.bstrap_diff_context(:,:,q,b), M.bstrap_same_context(:,:,q,b), bstrap_diff_context_bestpred, ...
+                    M.bstrap_loss(:,:,M.bstrap_best_shape(q,b)==M.shape,q,b), M.bstrap_best_intper_sec(q,b), ...
+                    M.bstrap_best_delay_sec_median(q,b), M.bstrap_best_shape(q,b), fname, aux_args{:});
+            end
+        end
+
+        % plot jack-knife samples
+        if I.plot_jack
+            n_jack = size(M.jack_diff_context,4);
+            for b = 1:n_jack
+                if ~I.skipsmppreds
+                    jack_diff_context_bestpred = M.jack_diff_context_bestpred(:,:,q,b);
+                else
+                    jack_diff_context_bestpred = [];
+                end
+                fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
+                    chname '-jack' num2str(b)]);
+                plot_modelfit(M.jack_diff_context(:,:,q,b), M.jack_same_context(:,:,q,b), jack_diff_context_bestpred, ...
+                    M.jack_loss(:,:,M.jack_best_shape(q,b)==M.shape,q,b), M.jack_best_intper_sec(q,b), ...
+                    M.jack_best_delay_sec_median(q,b), M.jack_best_shape(q,b), fname, aux_args{:});
+            end
+        end
         
         %%
         %

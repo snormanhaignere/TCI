@@ -597,6 +597,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
         L.jack_diff_context = zeros(n_lags, n_seg_durs, n_channels, n_sourcestim);
         L.jack_n_total_segs = zeros(n_seg_durs, n_sourcestim);
     end
+    if I.nbstrap
+        bstrap_smps = randi(n_sourcestim, [n_sourcestim, I.nbstrap]);
+    end
     for q = 1:n_channels % analysis is done separately for every channel to save memory
         
         chan = I.channels(q);
@@ -709,7 +712,6 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     if ~isempty(diffdur_valid_segs{i})
                         assert(numel(source_labels{i})==size(diffdur_valid_segs{i},1));
                     end
-                    bstrap_smps = randi(n_sourcestim, [n_sourcestim, I.nbstrap]);
                     for b = 1:I.nbstrap
                         
                         source_smps = bstrap_smps(:,b);
@@ -721,7 +723,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                     find(samedur_valid_segs{i} & source_labels{i}(:)==source_smps(l))]; %#ok<AGROW>
                             end
                             if q == 1
-                                L.bstrap_n_total_segs(i) = L.bstrap_n_total_segs(i) + length(samedur_seg_inds);
+                                L.bstrap_n_total_segs(i,b) = L.bstrap_n_total_segs(i,b) + length(samedur_seg_inds);
                             end
                             samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
                         else
@@ -738,7 +740,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                         find(diffdur_valid_segs{i}(:,j) & source_labels{i}(:)==source_smps(l))];
                                 end
                                 if q == 1
-                                    L.bstrap_n_total_segs(i) = L.bstrap_n_total_segs(i) + length(diffdur_seg_inds{j});
+                                    L.bstrap_n_total_segs(i,b) = L.bstrap_n_total_segs(i,b) + length(diffdur_seg_inds{j});
                                 end
                                 diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
                             end
@@ -777,7 +779,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         if make_samedur_comparisons
                             samedur_seg_inds = find(samedur_valid_segs{i} & ~ismember(source_labels{i}(:),k));
                             if q == 1
-                                L.jack_n_total_segs(i) = L.jack_n_total_segs(i) + length(samedur_seg_inds);
+                                L.jack_n_total_segs(i,k) = L.jack_n_total_segs(i,k) + length(samedur_seg_inds);
                             end
                             samedur_seg_pairs = [samedur_seg_inds, samedur_seg_inds];
                         else
@@ -788,10 +790,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             diffdur_seg_inds = cell(1, n_longer_seg_durs(i));
                             diffdur_seg_pairs = cell(1, n_longer_seg_durs(i));
                             for j = 1:n_longer_seg_durs(i)
-                                diffdur_seg_inds{j} = [diffdur_seg_inds{j}; ...
-                                    find(diffdur_valid_segs{i}(:,j) & ~ismember(source_labels{i}(:),k))];
+                                diffdur_seg_inds{j} = find(diffdur_valid_segs{i}(:,j) & ~ismember(source_labels{i}(:),k));
                                 if q == 1
-                                    L.jack_n_total_segs(i) = L.jack_n_total_segs(i) + length(diffdur_seg_inds{j});
+                                    L.jack_n_total_segs(i,k) = L.jack_n_total_segs(i,k) + length(diffdur_seg_inds{j});
                                 end
                                 diffdur_seg_pairs{j} = [diffdur_seg_inds{j}, diffdur_seg_inds{j}];
                             end
@@ -978,7 +979,7 @@ if I.plot_figure
         end
         
         % plot jack-knife
-        if I.jack && I.plot_bstrap
+        if I.jack && I.plot_jack
             n_sourcestim = size(L.jack_same_context,4);
             for k = 1:n_sourcestim
                 corr_range = plot_cross_context_corr(...
