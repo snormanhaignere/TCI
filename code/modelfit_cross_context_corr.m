@@ -113,6 +113,9 @@ I.ploterrquant = 0.3;
 I.plot_splits = isfield(L, 'splits_diff_context');
 I.plot_nullsmps = false;
 
+% directory to save output to
+I.output_directory = L.output_directory;
+
 % whether to run the analysis
 % if false, just returns the parameters to be used
 I.run = true;
@@ -138,12 +141,13 @@ end
 always_include = {'lossfn'};
 always_exclude = {...
     'run', 'figh', 'keyboard', 'plot_figure', 'plot_win', 'plot_smoothwin', 'linewidth', ...
-    'overwrite', 'ploterrquant', 'plot_splits', 'plot_delaystat', 'plot_delay_range'};
+    'overwrite', 'ploterrquant', 'plot_splits', 'plot_delaystat', 'plot_delay_range', ...
+    'output_directory'};
 param_string_modelfit = optInputs_to_string(I, C_value, always_include, always_exclude);
 
 % file to save results to
 % can optionally and just return this file
-MAT_file = mkpdir([L.output_directory '/model_fit_' param_string_modelfit '.mat']);
+MAT_file = mkpdir([I.output_directory '/model_fit_' param_string_modelfit '.mat']);
 if ~I.run
     M = struct;
     return;

@@ -531,9 +531,9 @@ if ~exist(MAT_file, 'file') || I.overwrite
         %% double check the excluded sources are absent
         
         if ~isempty(I.excludesources)
-            assert(isempty(intersect(source_labels{i}(samedur_valid_segs{i}), I.excludesources)));
+            assert(isempty(intersect(source_labels{i}(samedur_valid_segs{i}(:)), I.excludesources(:))));
             for j = 1:n_longer_seg_durs(i)
-                assert(isempty(intersect(source_labels{i}(diffdur_valid_segs{i}(:,j)), I.excludesources)));
+                assert(isempty(intersect(source_labels{i}(diffdur_valid_segs{i}(:,j)), I.excludesources(:))));
             end
         end
         
@@ -602,11 +602,15 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 assert(sum(xi)==1);
                 X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
                 for k = 1:n_segs_per_scramstim(i) % loop through all segments
-                    if ((make_samedur_comparisons && samedur_valid_segs{i}(k)) || ...
-                        (make_diffdur_comparisons && any(diffdur_valid_segs{i}(k, :))))
-                        targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
-                        ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
-                        Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
+                    try
+                        if ((make_samedur_comparisons && samedur_valid_segs{i}(k)) || ...
+                                (make_diffdur_comparisons && (n_longer_seg_durs(i)>0 && any(diffdur_valid_segs{i}(k, :)))))
+                            targ_times = L.lag_t' + seg_start_time_in_scramstim{i}(k,l);
+                            ti = targ_times > (t(1)-1e-6) & targ_times < (t(end)+1e-6);
+                            Y_seg(k, ti, l, :) = interp1( t, X, targ_times(ti) );
+                        end
+                    catch
+                        keyboard
                     end
                 end
                 clear ti targ_times;
