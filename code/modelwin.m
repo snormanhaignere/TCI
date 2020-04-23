@@ -1,4 +1,4 @@
-function [h,t_sec,causal] = modelwin(distr, intper_sec, delay_sec, varargin)
+function [h,t_sec,causal,min_peak] = modelwin(distr, intper_sec, delay_sec, varargin)
 
 % Parametric window with a given integration period and delay.
 % 
@@ -36,7 +36,7 @@ function [h,t_sec,causal] = modelwin(distr, intper_sec, delay_sec, varargin)
 
 %% Optional inputs
 
-% window and sampling rate
+% default window and sampling rate
 I.win = [-intper_sec*3, intper_sec*3] + delay_sec;
 I.sr = 100;
 
@@ -73,7 +73,7 @@ I.plot = false;
 % overwrite default parameters with those specified
 [I,C] = parse_optInputs_keyvalue(varargin, I);
 
-% set time vectory or window depending upon input
+% set time vector or window depending upon input
 if C.tsec % if time-vector is specified, adjust window/sampling rate
     t_sec = I.tsec;
     I.win = I.tsec([1 end]);
@@ -102,7 +102,7 @@ switch I.intervaltype
         assert(sum(yi)==1);
         low_tail = H.lowtail(xi,yi);
         high_tail = low_tail + I.intervalmass;
-        mass_interval = [low_tail, high_tail];
+        mass_interval = [low_tail, high_tail]; % CDF interval
     otherwise
         error('No matching interval type');
 end
@@ -130,6 +130,7 @@ switch distr
         
         % Gaussian window is never causal
         causal = false;
+        min_peak = [];
         
     case 'gamma'
         

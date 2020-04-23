@@ -79,6 +79,9 @@ else
         I.sr = 1/diff(I.tsec(1:2));
         assert(all(abs(diff(I.tsec)-diff(I.tsec(1:2)))<1e-6));
     else % if time-vector is not specified, determine based on window/sampling rate
+        if isempty(I.win)
+            I.win = t([1,end]);
+        end
         t_sec = (round(I.win(1)*I.sr):round(I.win(2)*I.sr))/I.sr;
     end
     if any(isnan(h_relpower(:))) || any(isnan(h(:))) || any(isnan(h_delayed(:)))
