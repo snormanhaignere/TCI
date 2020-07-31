@@ -29,11 +29,8 @@ for i = 2:n_groups
     
     % combine correlation, combine over channel dimension
     L_all.same_context = cat(3, L_all.same_context, L{i}.same_context);
+    L_all.same_context_twogroups = cat(3, L_all.same_context_twogroups, L{i}.same_context_twogroups);
     L_all.diff_context = cat(3, L_all.diff_context, L{i}.diff_context);
-    
-    % misc adaptation parameters, combine over channel dimension
-    L_all.mean_diff_tc = cat(3, L_all.mean_diff_tc, L{i}.mean_diff_tc);
-    L_all.mean_diff_tc_segdur = cat(4, L_all.mean_diff_tc_segdur, L{i}.mean_diff_tc_segdur);
     
     % combine across channels and group names, add group name to the channel name
     L_all.chnames = [L_all.chnames, strcat(I.groupnames{i}, '-', L{i}.chnames)];

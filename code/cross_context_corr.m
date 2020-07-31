@@ -65,6 +65,7 @@ I.oddevenmatch = false;
 % the sources are specified in S.sources
 % specify the indices of the sources to exclude
 I.excludesources = [];
+I.excludewin = [];
 
 % whether to overwrite or debug
 I.keyboard = false;
@@ -393,11 +394,27 @@ if ~exist(MAT_file, 'file') || I.overwrite
             clear xi;
         end
         
+        if ~isempty(I.excludewin)
+            short_seg_in_win = false(n_segs_per_scramstim(i), n_orders);
+            for l = 1:n_orders
+                seg_on = seg_start_time_in_scramstim{i}(:,l);
+                seg_off = seg_on + seg_dur;
+                xi = (seg_on > (I.excludewin(1)-1e-6) & seg_on < (I.excludewin(2)-1e-6)) ...
+                    | (seg_off > (I.excludewin(1)+1e-6) & seg_off < (I.excludewin(2)+1e-6));
+                short_seg_in_win(xi,l) = true;
+            end
+            short_seg_in_win = any(short_seg_in_win,2);
+            clear segon segoff xi;
+        end
+        
         % determine which segments are valid for same-duration comparisons
         % in this case the only reason a segment would be invalid is if 
         % its source was excluded
         if make_samedur_comparisons
             samedur_valid_segs{i} = ~ismember(source_labels{i}(:), I.excludesources(:));
+            if ~isempty(I.excludewin)
+                samedur_valid_segs{i}(short_seg_in_win) = false;
+            end
         end
         
         %% Now find embedded segments
@@ -455,6 +472,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             
                             diffdur_valid_segs{i}(k, j) = false;
                             
+                        elseif ~isempty(I.excludewin) && short_seg_in_win(k)
+                            
+                            diffdur_valid_segs{i}(k, j) = false;
+                            
                         else
                             
                             % find the start time of the shorter segment in the source stimulus
@@ -508,6 +529,34 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                     error('No matching boundary constraint');
                             end
                             
+                            % check if in a particular interval
+                            if diffdur_valid_segs{i}(k, j) && ~isempty(I.excludewin)
+                                
+                                % extract the segment responses for the longer segments
+                                for l = 1:n_orders
+                                    
+                                    % index of the longer segment int he scrambled stim
+                                    xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
+                                    assert(sum(xi)==1);
+                                    longer_seg_index_in_scramstim = find(longer_seg_order_indices(which_longseg, sourcestim_index)==S.segorder(xi).order);
+                                    assert(length(longer_seg_index_in_scramstim)==1);
+                                    clear xi;
+                                    
+                                    % find corresponding onset time
+                                    longer_seg_start_time = (longer_seg_index_in_scramstim-1)*longer_seg_dur;
+                                    
+                                    seg_on = longer_seg_start_time;
+                                    seg_off = seg_on + longer_seg_dur;
+                                    in_win = (seg_on > (I.excludewin(1)-1e-6) && seg_on < (I.excludewin(2)-1e-6)) ...
+                                        || (seg_off > (I.excludewin(1)+1e-6) && seg_off < (I.excludewin(2)+1e-6));
+                                    if in_win
+                                        diffdur_valid_segs{i}(k, j) = false;
+                                    end
+                                    clear segon segoff in_win;
+                                    
+                                end
+                            end
+                                                        
                             % if a valid segment based on boundary conditions
                             % then figure out the onset time relative to the scrambled stimulus
                             if diffdur_valid_segs{i}(k, j)
@@ -546,7 +595,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
         
     end
-    
+        
     %% Randomization factor for splits, see code well below for interpretation
     
     if I.nsplits>0
