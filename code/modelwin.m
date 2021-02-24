@@ -85,31 +85,10 @@ end
 
 %% Window
 
-switch I.intervaltype
-    case 'center'
-        low_tail = (1-I.intervalmass)/2;
-        high_tail = 1-low_tail;
-        mass_interval = [low_tail, high_tail];
-    case 'start'
-        low_tail = 0;
-        high_tail = I.intervalmass;
-        mass_interval = [low_tail, high_tail];
-    case 'highest'
-        load('highest_density_interval_gamma.mat', 'H');
-        xi = abs(H.mass-I.intervalmass)<1e-6;
-        yi = abs(H.shape-I.shape)<1e-6;
-        assert(sum(xi)==1);
-        assert(sum(yi)==1);
-        low_tail = H.lowtail(xi,yi);
-        high_tail = low_tail + I.intervalmass;
-        mass_interval = [low_tail, high_tail]; % CDF interval
-    otherwise
-        error('No matching interval type');
-end
-
 switch distr
     case 'gauss'
         
+        error('Mass interval needs to be implemented');
         if ~(strcmp(I.delaypoint, 'peak'))
             error('For Gaussian delaypoint must be "peak"');
         end
@@ -134,39 +113,10 @@ switch distr
         
     case 'gamma'
         
-        % gaussian window
-        % sigma corresponding to 95%
-        a = I.shape;
-        b = 1/I.shape;
+        [h, causal] = gamma_reparam(intper_sec, delay_sec, I.shape, ...
+            'delaypoint', I.delaypoint, 'cdf', I.cdf, 'intervaltype', I.intervaltype, ...
+            'intervalmass', I.intervalmass, 'tsec', t_sec);
         
-        % ratio which to scale stimulus
-        default_intper = gaminv(mass_interval(2),a,b) - gaminv(mass_interval(1),a,b);
-        r = intper_sec/default_intper;
-        
-        % offset to adust delay
-        switch I.delaypoint
-            case 'peak'
-                min_peak = max((a-1)*b,0)*r;
-            case 'median'
-                min_peak = gaminv(0.5,a,b)*r;
-            case 'start'
-                min_peak = 0;
-            otherwise
-                error('delaypoint %s is not valid\n', I.delaypoint);
-        end
-        c = delay_sec - min_peak;
-        if delay_sec < min_peak
-            causal = false;
-        else
-            causal = true;
-        end
-        
-        % gamma distribution
-        if I.cdf
-            h = gamcdf((t_sec-c)/r, a, b);
-        else
-            h = gampdf((t_sec-c)/r, a, b);
-        end
         if I.forcecausal
             assert(~I.cdf)
             h(t_sec < 0) = 0;

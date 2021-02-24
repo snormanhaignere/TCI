@@ -1,18 +1,20 @@
 % Code that checks model window is correctly parametrized
 
 clc;
-intper = 0.2
-delay = 0.3
-shape = 2;
+intper = 0.2;
+delay = 0.2;
+shape = 3;
 
-sr = 100000;
+sr = 1000;
 intervalmass = 0.75;
-delaypoint = 'median';
+delaypoint = 'start';
 tsec = 0:1/sr:2;
 % tsec = [];
 [h,t_sec,causal] = modelwin('gamma', intper, delay, 'sr', sr, 'delaypoint', delaypoint, ...
     'shape', shape, 'intervalmass', intervalmass, 'tsec', tsec);
 plot(t_sec, h);
+
+%%
 
 % measure the integration period
 measured_cdf = cumsum(h);
