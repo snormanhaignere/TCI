@@ -88,6 +88,16 @@ I.plot = false;
 % overwrite default parameters with those specified
 [I,C] = parse_optInputs_keyvalue(varargin, I);
 
+if C.win
+    time_boundary(1) = min([time_boundary(1), I.win(1)]);
+    time_boundary(2) = max([time_boundary(2), I.win(2)]);
+end
+
+if C.tsec
+    time_boundary(1) = min([time_boundary(1), I.tsec(1)]);
+    time_boundary(2) = max([time_boundary(2), I.tsec(end)]);
+end
+
 %% Perform convolution
 
 % internal time vectory used for convolution
