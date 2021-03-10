@@ -1,7 +1,7 @@
 segdur_sec = 0.8;
 intper_sec = 0.1;
 delay_sec = 0;
-shape = 3; % 1 2 3 5
+shape = 3; % 1 2 3 5    
 
 sr = 100;
 intervalmass = 0.75;

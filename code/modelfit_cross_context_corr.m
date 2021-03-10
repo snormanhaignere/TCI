@@ -618,16 +618,12 @@ if I.plot_figure
         end
         
         % plot
-        try
-            aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t, I.intervaltype, I.intervalmass, ...
-                I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
-            fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
-            plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
-                M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
-                M.best_shape(q), fname, aux_args{:})
-        catch
-            keyboard
-        end
+        aux_args = {M.intper_sec, M.delay_sec_start, L.unique_segs, L.lag_t, I.intervaltype, I.intervalmass, ...
+            I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
+        fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
+        plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
+            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
+            M.best_shape(q), fname, aux_args{:})
         
         % plot null samples
         if I.nullsmps>0 && I.plot_nullsmps

@@ -3,7 +3,7 @@ function plot_modelfit(diff_context, same_context, diff_context_bestpred, ...
     intper_sec, delay_sec_start, unique_segs, lag_t,  intervaltype, intervalmass, ...
     plot_win, plot_smoothwin, plot_delaystat, plot_delay_range, ploterrquant, linewidth, figh)
 
-corr_range = quantile(diff_context(:), [0.01, 0.99]);
+corr_range = quantile(diff_context(:), [0.01, 0.99]) + [0, 1e-5];
 
 win_string = sprintf('-win-%d-%dms', round(plot_win(1)*1000), round(plot_win(2)*1000));
 
@@ -97,7 +97,8 @@ end
 cmap = flipud(cbrewer('seq', 'Reds', 128));
 [minX,zi] = min(X(:));
 [~, xi] = ind2sub(size(X), zi);
-bounds = [minX, quantile(X(:,xi), ploterrquant)];
+bounds = [minX, quantile(X(:,xi), ploterrquant)]
+% bounds = bounds + [0, 1e-5]
 clear xi zi;
 if ~all(isnan(X(:)))
     clf(figh);
