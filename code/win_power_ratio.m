@@ -36,6 +36,10 @@ I.rampdur = 0;
 % correlation factor
 I.corrfac = 0;
 
+% boundary parameters
+I.boundstrength = 0;
+I.boundexp = 1;
+
 % can optionally plot result
 I.plot = false;
 
@@ -48,7 +52,7 @@ I.plot = false;
 internal_sr = ceil(segdur_sec * I.target_sr) / segdur_sec;
 segdur_smps = checkint(segdur_sec * internal_sr);
 
-% create the window
+% measure overlap
 [h, t, causal] = winoverlap(segdur_sec, distr, intper_sec, delay_sec, ...
      'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
      'plot', false,'internal_sr', internal_sr, 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
@@ -60,12 +64,45 @@ N_delays = ceil(length(h)/segdur_smps);
 shifts = (-N_delays:N_delays)*segdur_smps;
 h_delayed = add_delays(h, shifts);
 
+%% Boundary effects
+
+% total overlap of adjacent segments
+adjacent_sum = h_delayed(:,1:end-1) + h_delayed(:,2:end);
+
+% fraction of that total pairwise overlap
+% due to the first segment
+split_frac = h_delayed(:,1:end-1) ./ adjacent_sum;
+split_frac(adjacent_sum < 1e-5) = 0;
+
+% map split through raised cosine so that 0.5 is 1 and 0/1 are 0
+boundary_effect = (0.5-cos(split_frac*2*pi)/2).^I.boundexp;
+h_boundary = boundary_effect .* adjacent_sum;
+
+% figure;
+% plot([h_boundary, sum(h_boundary,2)]);
+
+% impulse response corresponding to overlap with boundary
+% irf = modelwin(distr, intper_sec, delay_sec, ...
+%      'shape', I.shape, 'forcecausal', I.forcecausal, 'delaypoint', I.delaypoint, ...
+%      'plot', false,'tsec', t, ...
+%      'intervalmass', I.intervalmass, 'intervaltype', I.intervaltype);
+
+% irf_delayed = add_delays(irf'/max(irf), shifts);
+
+% delayed copies
+% plot(t, [h, irf_h'/max(irf_h)])
+
+%% Calculate predicted correlation
+
 % no correlation
-h_nocorr = bsxfun(@times, h.^2, 1./sum(h_delayed.^2,2));
+% denom = sum(h_delayed.^2,2) + 11*sum(irf_delayed.^2,2);
+denom = sum(h_delayed.^2,2) + I.boundstrength * sum(h_boundary.^2,2);
+h_nocorr = bsxfun(@times, h.^2, 1./denom);
 
 % perfect correlation
 h_perfcorr = h .* sum(h_delayed,2) ./ sqrt(sum(h_delayed.^2,2) .* sum(h_delayed,2).^2);
 h_relpower = I.corrfac * h_perfcorr + (1-I.corrfac) * h_nocorr;
+% plot(t, h_relpower)
 
 %% Interpolate
 
