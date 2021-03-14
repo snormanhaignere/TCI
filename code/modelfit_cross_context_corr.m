@@ -67,6 +67,10 @@ I.tranweightnsegs = 'none'; % applied to total segs
 % whether to transform the predictions
 I.tranpred = 'none';
 
+% whether and how to scale predictions
+% only option currently is 'downpersegdur'
+I.scalepred = 'none';
+
 % whether to create null samples with phase scrambling
 I.nullsmps = 0;
 
@@ -356,11 +360,41 @@ if ~exist(MAT_file, 'file') || I.overwrite
             Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
             
             for j = 1:length(M.delay_sec_start)
-                
+
                 % multiply model prediction by same-context correlation
                 % to get a prediction of the different context correlation
+                % lag/segdur x channel x smp x null-smp
                 X = Y_model_with_delays(:,:,j);
                 diff_context_pred = bsxfun(@times, same_context_format, X(:));
+                
+                switch I.scalepred
+                    case 'downpersegdur'
+                                                                        
+                        % find optimal scaling
+                        % beta: 1 (where lag used to be) x everything
+                        dc = reshape(diff_context_format, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
+                        p = reshape(diff_context_pred, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
+                        pnorm = bsxfun(@times, p, 1./sum(p.^2));
+                        beta = sum(pnorm .* dc,1);
+                        
+                        % force scaling to be between 0 and 1
+                        beta(beta<0) = 0;
+                        beta(beta>1) = 1;
+                        
+                        % multiply beta by prediction using matrix expansion
+                        % -> lag x everything
+                        scaled_pred = bsxfun(@times, p, beta);
+                        
+                        % reformat and reassign
+                        diff_context_pred = reshape(scaled_pred, [n_lags * length(valid_seg_durs), n_channels, n_smps, (I.nullsmps+1)]);
+                        
+                    case 'none'
+                        
+                        % nothing!
+                        
+                    otherwise
+                        error('Switch fell through')
+                end
                 
                 % calculate loss
                 if strcmp(I.lossfn, 'unbiased-sqerr')
@@ -442,7 +476,35 @@ if ~exist(MAT_file, 'file') || I.overwrite
                         predictor_notrans(predictor_notrans<0) = 0;
                         predictor = tranpred(predictor_notrans);
                         
-                        M.diff_context_bestpred(:,k,q,s,l) = bsxfun(@times, predictor, M.same_context(:,k,q,s,l));
+                        switch I.scalepred
+                            case 'downpersegdur'
+                                
+                                p = bsxfun(@times, predictor, M.same_context(:,k,q,s,l));
+                                dc = M.diff_context(:,k,q,s,l);
+                                
+                                % find optimal scaling
+                                % beta: 1 (where lag used to be) x everything
+                                pnorm = p / sum(p.^2);
+                                beta = pnorm' * dc;
+                                
+                                % force scaling to be between 0 and 1
+                                beta(beta<0) = 0;
+                                beta(beta>1) = 1;
+                                
+                                % multiply beta by prediction using matrix expansion
+                                % -> lag x everything
+                                scaled_pred = p * beta;
+                                
+                                % reformat and reassign
+                                M.diff_context_bestpred(:,k,q,s,l) = scaled_pred;
+                                
+                            case 'none'
+                                
+                                M.diff_context_bestpred(:,k,q,s,l) = bsxfun(@times, predictor, M.same_context(:,k,q,s,l));
+                                
+                            otherwise
+                                error('Switch fell through')
+                        end
                     end
                 end
             end
