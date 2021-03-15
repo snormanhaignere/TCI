@@ -56,6 +56,9 @@ I.minreliability = 0.01;
 % 1 -> exponential, higher -> more Gaussian
 I.shape = [1,2,3,5];
 
+% strength of the boundary
+I.boundstrength = 0;
+
 % whether to use the power ratio between
 % segments to predict the correlation
 I.winpowratio = true;
@@ -323,140 +326,146 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % normalize weights
     W_total_format = bsxfun(@times, W_total_format, 1./sum(W_total_format,1));
-    
+        
     % integration period
     M.intper_sec = logspace(log10(I.intper_range(1)), log10(I.intper_range(2)), I.nintper);
     M.delay_sec_start = I.delay_range(1):I.delay_interval:I.delay_range(2);
     M.delay_sec_start = round(M.delay_sec_start*L.sr)/L.sr;
     M.shape = I.shape;
-    M.loss = nan(length(M.intper_sec), length(M.delay_sec_start), length(M.shape), n_channels, n_smps, I.nullsmps+1);
-    for m = 1:length(M.shape)
-        for i = 1:length(M.intper_sec)
-            fprintf('shape %.2f, intper %.0f ms\n', M.shape(m), M.intper_sec(i)*1000);drawnow;
-            
-            % calculate predictions for each segment
-            Y_model = nan(n_lags, n_valid_segdurs);
-            for k = 1:n_valid_segdurs
-                [winpow, ~, overlap] = win_power_ratio(L.unique_segs(valid_seg_durs(k))/1000, ...
-                    I.distr, M.intper_sec(i), 0, ...
-                    'shape', M.shape(m), 'tsec', L.lag_t, ...
-                    'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
-                    'intervalmass', I.intervalmass, ...
-                    'intervaltype', I.intervaltype, ...
-                    'delaypoint', 'start',  'corrfac', I.corrfac);
-                if I.winpowratio
-                    predictor_notrans = winpow;
-                else
-                    predictor_notrans = overlap;
-                end
-                predictor_notrans(predictor_notrans<0) = 0;
-                predictor = tranpred(predictor_notrans);
+    M.boundstrength = I.boundstrength;
+    M.loss = nan(length(M.intper_sec), length(M.delay_sec_start), length(M.shape), length(M.boundstrength), n_channels, n_smps, I.nullsmps+1);
+    for b = 1:length(M.boundstrength)
+        for m = 1:length(M.shape)
+            for i = 1:length(M.intper_sec)
+                fprintf('bound-strength %.2f, shape %.2f, intper %.0f ms\n', M.boundstrength(b), M.shape(m), M.intper_sec(i)*1000);drawnow;
                 
-                Y_model(:,k) = predictor;
-            end
-            
-            % create delays
-            % lag x segment duration x time delays
-            Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
-            
-            for j = 1:length(M.delay_sec_start)
-
-                % multiply model prediction by same-context correlation
-                % to get a prediction of the different context correlation
-                % lag/segdur x channel x smp x null-smp
-                X = Y_model_with_delays(:,:,j);
-                diff_context_pred = bsxfun(@times, same_context_format, X(:));
-                
-                switch I.scalepred
-                    case 'downpersegdur'
-                                                                        
-                        % find optimal scaling
-                        % beta: 1 (where lag used to be) x everything
-                        dc = reshape(diff_context_format, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
-                        p = reshape(diff_context_pred, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
-                        pnorm = bsxfun(@times, p, 1./sum(p.^2));
-                        beta = sum(pnorm .* dc,1);
-                        
-                        % force scaling to be between 0 and 1
-                        beta(beta<0) = 0;
-                        beta(beta>1) = 1;
-                        
-                        % multiply beta by prediction using matrix expansion
-                        % -> lag x everything
-                        scaled_pred = bsxfun(@times, p, beta);
-                        
-                        % reformat and reassign
-                        diff_context_pred = reshape(scaled_pred, [n_lags * length(valid_seg_durs), n_channels, n_smps, (I.nullsmps+1)]);
-                        
-                    case 'none'
-                        
-                        % nothing!
-                        
-                    otherwise
-                        error('Switch fell through')
+                % calculate predictions for each segment
+                Y_model = nan(n_lags, n_valid_segdurs);
+                for k = 1:n_valid_segdurs
+                    [winpow, ~, overlap] = win_power_ratio(L.unique_segs(valid_seg_durs(k))/1000, ...
+                        I.distr, M.intper_sec(i), 0, ...
+                        'shape', M.shape(m), 'tsec', L.lag_t, ...
+                        'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
+                        'intervalmass', I.intervalmass, ...
+                        'intervaltype', I.intervaltype, ...
+                        'delaypoint', 'start',  'corrfac', I.corrfac, ...
+                        'boundstrength', M.boundstrength(b));
+                    if I.winpowratio
+                        predictor_notrans = winpow;
+                    else
+                        predictor_notrans = overlap;
+                    end
+                    predictor_notrans(predictor_notrans<0) = 0;
+                    predictor = tranpred(predictor_notrans);
+                    
+                    Y_model(:,k) = predictor;
                 end
                 
-                % calculate loss
-                if strcmp(I.lossfn, 'unbiased-sqerr')
-                    err = bsxfun(@times, same_context_err_format, X(:).^2);
-                    M.loss(i,j,m,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format, err);
-                else
-                    %                     keyboard;
-                    %
-                    %                     %%
-                    %
-                    %                     figure;
-                    %                     imagesc(squeeze(diff_context_pred(:,2,13,:)*1e6));
-                    %                     colorbar;
-                    %
-                    %                     %%
-                    %
-                    %                     x = squeeze(sum(diff_context_format(1:100,2,13,:).^2))
-                    %
-                    %
-                    %                     %%
-                    %
-                    %                     e = x-y;
-                    %
-                    %
-                    %                     %%
-                    %
-                    %                     plot(W_total_format(:,2,13,1))
-                    %
-                    %                     %%
-                    %
-                    %                     figure;
-                    %                     imagesc(squeeze(E(1,2,:,:)))
-                    %
-                    %                     %%
-                    M.loss(i,j,m,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
+                % create delays
+                % lag x segment duration x time delays
+                Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
+                
+                for j = 1:length(M.delay_sec_start)
+                    
+                    % multiply model prediction by same-context correlation
+                    % to get a prediction of the different context correlation
+                    % lag/segdur x channel x smp x null-smp
+                    X = Y_model_with_delays(:,:,j);
+                    diff_context_pred = bsxfun(@times, same_context_format, X(:));
+                    
+                    switch I.scalepred
+                        case 'downpersegdur'
+                            
+                            % find optimal scaling
+                            % beta: 1 (where lag used to be) x everything
+                            dc = reshape(diff_context_format, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
+                            p = reshape(diff_context_pred, [n_lags, length(valid_seg_durs)*n_channels*n_smps*(I.nullsmps+1)]);
+                            pnorm = bsxfun(@times, p, 1./sum(p.^2));
+                            beta = sum(pnorm .* dc,1);
+                            
+                            % force scaling to be between 0 and 1
+                            beta(beta<0) = 0;
+                            beta(beta>1) = 1;
+                            
+                            % multiply beta by prediction using matrix expansion
+                            % -> lag x everything
+                            scaled_pred = bsxfun(@times, p, beta);
+                            
+                            % reformat and reassign
+                            diff_context_pred = reshape(scaled_pred, [n_lags * length(valid_seg_durs), n_channels, n_smps, (I.nullsmps+1)]);
+                            
+                        case 'none'
+                            
+                            % nothing!
+                            
+                        otherwise
+                            error('Switch fell through')
+                    end
+                    
+                    % calculate loss
+                    if strcmp(I.lossfn, 'unbiased-sqerr')
+                        err = bsxfun(@times, same_context_err_format, X(:).^2);
+                        M.loss(i,j,m,b,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format, err);
+                    else
+                        %                     keyboard;
+                        %
+                        %                     %%
+                        %
+                        %                     figure;
+                        %                     imagesc(squeeze(diff_context_pred(:,2,13,:)*1e6));
+                        %                     colorbar;
+                        %
+                        %                     %%
+                        %
+                        %                     x = squeeze(sum(diff_context_format(1:100,2,13,:).^2))
+                        %
+                        %
+                        %                     %%
+                        %
+                        %                     e = x-y;
+                        %
+                        %
+                        %                     %%
+                        %
+                        %                     plot(W_total_format(:,2,13,1))
+                        %
+                        %                     %%
+                        %
+                        %                     figure;
+                        %                     imagesc(squeeze(E(1,2,:,:)))
+                        %
+                        %                     %%
+                        M.loss(i,j,m,b,:,:,:) = lossfn(diff_context_format, diff_context_pred, W_total_format);
+                    end
                 end
             end
         end
     end
-    
+        
     % find best prediction
     M.diff_context_bestpred = nan(n_lags, n_seg, n_channels, (n_smps-1)*(~I.skipsmppreds)+1, I.nullsmps*(~I.skipnullpreds)+1);
     M.best_intper_sec = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_delay_sec_start = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_delay_sec_median = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_shape = nan(n_channels, n_smps, I.nullsmps+1);
+    M.best_boundstrength = nan(n_channels, n_smps, I.nullsmps+1);
     M.best_loss = nan(n_channels, n_smps, I.nullsmps+1);
     for q = 1:n_channels
         for s = 1:n_smps
             for l = 1:I.nullsmps+1
-                X = M.loss(:,:,:,q,s,l);
+                X = M.loss(:,:,:,:,q,s,l);
                 [~,xi] = min(X(:));
-                [a,b,c] = ind2sub(size(X), xi);
+                [a,b,c,d] = ind2sub(size(X), xi);
                 clear X;
-                M.best_loss(q,s,l) = M.loss(a,b,c,q,s,l);
+                M.best_loss(q,s,l) = M.loss(a,b,c,d,q,s,l);
                 M.best_intper_sec(q,s,l) = M.intper_sec(a);
                 M.best_delay_sec_start(q,s,l) = M.delay_sec_start(b);
                 M.best_shape(q,s,l) = M.shape(c);
+                M.best_boundstrength(q,s,l) = M.boundstrength(d);
                 M.best_delay_sec_median(q,s,l) = modelwin_convert_delay(M.best_intper_sec(q,s,l), ...
                     M.best_delay_sec_start(q,s,l), M.best_shape(q,s,l), 'median', ...
                     'intervaltype', I.intervaltype, 'intervalmass', I.intervalmass);
-                clear a b c;
+                clear a b c d;
                 
                 % get prediction
                 if (l == 1 || ~I.skipnullpreds) && (s == 1 || ~I.skipsmppreds)
@@ -467,7 +476,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                             'intervalmass', I.intervalmass, ...
                             'intervaltype', I.intervaltype, ...
-                            'delaypoint', 'start', 'corrfac', I.corrfac);
+                            'delaypoint', 'start', 'corrfac', I.corrfac, ...
+                            'boundstrength', M.best_boundstrength(q,s,l));
                         if I.winpowratio
                             predictor_notrans = winpow;
                         else
@@ -514,9 +524,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
     % separate out null samples into a different field for clarity
     if I.nullsmps>0
         fa = {...
-            'loss', 6; ...
+            'loss', 7; ...
             'diff_context', 5; 'same_context', 5; 'same_context_err', 5; ...
-            'best_intper_sec', 3; 'best_delay_sec_start', 3; 'best_delay_sec_median', 3; 'best_shape', 3; 'best_loss', 3; ...
+            'best_intper_sec', 3; 'best_delay_sec_start', 3; 'best_delay_sec_median', 3; ...
+            'best_shape', 3; 'best_boundstrength', 3; 'best_loss', 3; ...
             };
         if ~I.skipnullpreds
             fa = cat(1, fa, {'diff_context_bestpred'; 5});
@@ -558,9 +569,10 @@ if ~exist(MAT_file, 'file') || I.overwrite
         
         % fields and dimensions to separate out
         fa = {...
-            'loss', 5; ...
+            'loss', 6; ...
             'diff_context', 4; 'same_context', 4; 'same_context_err', 4; ...
-            'best_intper_sec', 2; 'best_delay_sec_start', 2; 'best_delay_sec_median', 2; 'best_shape', 2; 'best_loss', 2; ...
+            'best_intper_sec', 2; 'best_delay_sec_start', 2; 'best_delay_sec_median', 2; ...
+            'best_shape', 2; 'best_loss', 2; 'best_boundstrength', 2; ...
             };
 
         if I.nullsmps>0
@@ -597,12 +609,12 @@ if ~exist(MAT_file, 'file') || I.overwrite
         for q = 1:n_channels
             for s = 1:n_splits
                 for p = 1:n_partitions
-                    X = mean(M.splits_loss(:,:,:,q,setdiff(1:n_partitions,p),s),5);
+                    X = mean(M.splits_loss(:,:,:,:,q,setdiff(1:n_partitions,p),s),5);
                     [~,xi] = min(X(:));
-                    [a,b,c] = ind2sub(size(X), xi);
-                    M.cv_loss(q, p, s) = M.splits_loss(a,b,c,q,p,s);
+                    [a,b,c,d] = ind2sub(size(X), xi);
+                    M.cv_loss(q, p, s) = M.splits_loss(a,b,c,d,q,p,s);
                     if I.nullsmps>0
-                        M.null_cv_loss(q, p, s, :) = M.splits_null_loss(a,b,c,q,p,s,:);
+                        M.null_cv_loss(q, p, s, :) = M.splits_null_loss(a,b,c,d,q,p,s,:);
                     end
                     
                     if ~I.skipcvpreds
@@ -613,7 +625,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                                 'rampwin', I.rampwin, 'rampdur', I.rampdur, ...
                                 'intervalmass', I.intervalmass, ...
                                 'intervaltype', I.intervaltype, ...
-                                'delaypoint', 'start', 'corrfac', I.corrfac);
+                                'delaypoint', 'start', 'corrfac', I.corrfac, ...
+                                'boundstrength', M.boundstrength(d));
                             if I.winpowratio
                                 predictor_notrans = winpow;
                             else
@@ -625,7 +638,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             M.cv_diff_context_bestpred(:,k,q,p,s) = bsxfun(@times, predictor, M.splits_same_context(:,k,q,p,s));
                         end
                     end
-                    clear a b c X;
+                    clear a b c d X;
                     
                 end
             end
@@ -684,7 +697,8 @@ if I.plot_figure
             I.plot_win, I.plot_smoothwin, I.plot_delaystat, I.plot_delay_range, I.ploterrquant, I.linewidth, I.figh};
         fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' chname]);
         plot_modelfit(M.diff_context(:,:,q), M.same_context(:,:,q), M.diff_context_bestpred(:,:,q), ...
-            M.loss(:,:,M.best_shape(q)==M.shape, q), M.best_intper_sec(q), M.best_delay_sec_median(q), ...
+            M.loss(:,:,M.best_shape(q)==M.shape, M.best_boundstrength(q)==M.boundstrength, q), ...
+            M.best_intper_sec(q), M.best_delay_sec_median(q), ...
             M.best_shape(q), fname, aux_args{:})
         
         % plot null samples
@@ -697,7 +711,7 @@ if I.plot_figure
                     null_diff_context_bestpred = [];
                 end
                 plot_modelfit(M.null_diff_context(:,:,q,l), M.null_same_context(:,:,q,l), null_diff_context_bestpred, ...
-                    M.null_loss(:,:,M.null_best_shape(q)==M.shape,q,l), M.null_best_intper_sec(q,l), ...
+                    M.null_loss(:,:,M.null_best_shape(q)==M.shape, M.null_best_boundstrength(q)==M.boundstrength,q,l), M.null_best_intper_sec(q,l), ...
                     M.null_best_delay_sec_median(q,l), M.null_best_shape(q,l), fname, aux_args{:})
             end
         end
@@ -715,7 +729,7 @@ if I.plot_figure
                     fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
                         chname '-split' num2str(s) '-p' num2str(p)]);
                     plot_modelfit(M.splits_diff_context(:,:,q,p,s), M.splits_same_context(:,:,q,p,s), cv_diff_context_bestpred, ...
-                        M.splits_loss(:,:,M.best_shape(q)==M.shape,q,p,s), M.splits_best_intper_sec(q,p,s), ...
+                        M.splits_loss(:,:,M.best_shape(q)==M.shape,M.best_boundstrength(q)==M.boundstrength(q),p,s), M.splits_best_intper_sec(q,p,s), ...
                         M.splits_best_delay_sec_median(q,p,s), M.splits_best_shape(q,p,s), fname, aux_args{:})
                     %                     if I.nullsmps>0 && I.plot_nullsmps
                     %                         for l = 1:I.nullsmps
@@ -750,7 +764,7 @@ if I.plot_figure
                 fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
                     chname '-bstrap' num2str(b)]);
                 plot_modelfit(M.bstrap_diff_context(:,:,q,b), M.bstrap_same_context(:,:,q,b), bstrap_diff_context_bestpred, ...
-                    M.bstrap_loss(:,:,M.bstrap_best_shape(q,b)==M.shape,q,b), M.bstrap_best_intper_sec(q,b), ...
+                    M.bstrap_loss(:,:,M.bstrap_best_shape(q,b)==M.shape,M.bstrap_best_boundstrength(q,b)==M.boundstrength,q,b), M.bstrap_best_intper_sec(q,b), ...
                     M.bstrap_best_delay_sec_median(q,b), M.bstrap_best_shape(q,b), fname, aux_args{:});
             end
         end
@@ -767,7 +781,7 @@ if I.plot_figure
                 fname = mkpdir([L.figure_directory '/model-fit-' param_string_modelfit '/' ...
                     chname '-jack' num2str(b)]);
                 plot_modelfit(M.jack_diff_context(:,:,q,b), M.jack_same_context(:,:,q,b), jack_diff_context_bestpred, ...
-                    M.jack_loss(:,:,M.jack_best_shape(q,b)==M.shape,q,b), M.jack_best_intper_sec(q,b), ...
+                    M.jack_loss(:,:,M.jack_best_shape(q,b)==M.shape, M.jack_best_boundstrength(q,b)==M.boundstrength,q,b), M.jack_best_intper_sec(q,b), ...
                     M.jack_best_delay_sec_median(q,b), M.jack_best_shape(q,b), fname, aux_args{:});
             end
         end
