@@ -83,6 +83,10 @@ else % if time-vector is not specified, determine based on window/sampling rate
     t_sec = (round(I.win(1)*I.sr):round(I.win(2)*I.sr))/I.sr;
 end
 
+if min(t_sec) > 0
+    warning('Earliest timepoint after 0');
+end
+
 %% Window
 
 switch distr
@@ -113,7 +117,7 @@ switch distr
         
     case 'gamma'
         
-        [h, causal] = gamma_reparam(intper_sec, delay_sec, I.shape, ...
+        [h, causal, ~, ~, ~, ~, ~, min_peak] = gamma_reparam(intper_sec, delay_sec, I.shape, ...
             'delaypoint', I.delaypoint, 'cdf', I.cdf, 'intervaltype', I.intervaltype, ...
             'intervalmass', I.intervalmass, 'tsec', t_sec);
         

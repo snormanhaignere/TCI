@@ -97,7 +97,7 @@ end
 cmap = flipud(cbrewer('seq', 'Reds', 128));
 [minX,zi] = min(X(:));
 [~, xi] = ind2sub(size(X), zi);
-bounds = [minX, quantile(X(:,xi), ploterrquant)]
+bounds = [minX, quantile(X(:,xi), ploterrquant)];
 % bounds = bounds + [0, 1e-5]
 clear xi zi;
 if ~all(isnan(X(:)))

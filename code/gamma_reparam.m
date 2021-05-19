@@ -1,4 +1,4 @@
-function [h, causal, a, b, r, c, t_sec] = gamma_reparam(intper_sec, delay_sec, shape, varargin)
+function [h, causal, a, b, r, c, t_sec, min_peak] = gamma_reparam(intper_sec, delay_sec, shape, varargin)
 
 % Reparametrize gamma distribution in terms of 
 % integration period, delay, and shape
