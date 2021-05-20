@@ -15,6 +15,7 @@ root_directory = '/Users/svnh2/Desktop/projects';
 addpath([root_directory '/general-analysis-code']);
 addpath([root_directory '/export_fig_v3']);
 directory_to_save_results = [TCI_directory '/results/v1'];
+if ~exist(directory_to_save_results, 'dir'); mkdir(directory_to_save_results); end
 L = cross_context_corr(D, t, S, 'chnames', chnames, ...
     'output_directory', directory_to_save_results, ...
     'boundary', 'any', 'lag_win', [0, 1], 'plot_figure', true);
