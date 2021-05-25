@@ -3,7 +3,7 @@
 clc;
 intper = 0.2;
 delay = 0.2;
-shape = 3;
+shape = 1;
 
 sr = 1000;
 intervalmass = 0.75;
@@ -11,7 +11,7 @@ delaypoint = 'start';
 tsec = 0:1/sr:2;
 % tsec = [];
 [h,t_sec,causal] = modelwin('gamma', intper, delay, 'sr', sr, 'delaypoint', delaypoint, ...
-    'shape', shape, 'intervalmass', intervalmass, 'tsec', tsec);
+    'shape', shape, 'intervalmass', intervalmass, 'tsec', tsec, 'intervaltype', 'center');
 plot(t_sec, h);
 
 %%
