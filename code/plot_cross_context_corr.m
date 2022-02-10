@@ -32,6 +32,6 @@ for k = 1:n_seg_durs
     ylabel('Similarity');
     title(sprintf('Seg: %.0f ms', unique_segs(k)))
     if k == 1
-        legend('Same', 'Cross');
+        legend('Ceiling', 'Cross-context');
     end
 end

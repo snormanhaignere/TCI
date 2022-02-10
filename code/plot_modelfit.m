@@ -38,7 +38,7 @@ if ~isempty(diff_context_bestpred)
         ylabel('Pearson Correlation');
         title(sprintf('Seg: %.0f ms', unique_segs(k)))
         if k == 1
-            legend([h1, h2, h3], 'Same', 'Cross', 'Model');
+            legend([h1, h2, h3], 'Ceiling', 'CCC', 'Model Pred.');
         end
         box off;
     end
@@ -63,7 +63,7 @@ if ~isempty(diff_context_bestpred)
         set(gca, 'XTick', xticks, 'XTickLabel', lag_t(xticks)*1000);
         ylabel('Seg Dur (ms)'); xlabel('Lag (ms)');
         if i == 2
-            title(sprintf('rf=%.f ms, delay=%.f ms', best_intper_sec*1000, best_delay_sec_median*1000));
+            title(sprintf('width=%.f ms, center=%.f ms', best_intper_sec*1000, best_delay_sec_median*1000));
         end
     end
     fname = [fname_global '-prediction-image' win_string];
@@ -110,8 +110,8 @@ if ~all(isnan(X(:)))
     set(gca, 'YTick', yticks, 'YTickLabel', 1000*intper_sec(yticks));
     xticks = unique(round(linspace(1, length(delays_to_plot), 5)));
     set(gca, 'XTick', xticks, 'XTickLabel', 1000*delays_to_plot(xticks));
-    xlabel('Delay (ms)'); ylabel('Receptive Field Duration (ms)');
-    title(sprintf('rf=%.f ms, delay=%.f ms', best_intper_sec*1000, best_delay_sec_median*1000));
+    xlabel('Center (ms)'); ylabel('Width (ms)');
+    title(sprintf('width=%.f ms, center=%.f ms', best_intper_sec*1000, best_delay_sec_median*1000));
     set(gca, 'FontSize', 12);
     fname = [fname_global '-model-error'];
     export_fig([fname '.png'], '-png', '-transparent', '-r150');
