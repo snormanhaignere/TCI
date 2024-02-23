@@ -193,10 +193,6 @@ if ~exist(MAT_file, 'file') || I.overwrite
     
     % number of orders tested
     n_orders = length(unique(S.orders));
-    n_orders_segspec = nan(1, n_seg_durs);
-    for i = 1:n_seg_durs
-        n_orders_segspec(i) = length(unique(S.orders(S.segs==L.unique_segs(i))));
-    end
     
     % total number of channels to test
     n_channels = length(I.channels);
@@ -387,8 +383,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
         
         % onset of each segment in the original source stimulus
         seg_onsets_in_sourcestim = (0:n_segs_per_sourcestim-1)*seg_dur;
-        seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders_segspec(i));
-        for l = 1:n_orders_segspec(i)
+        seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders);
+        for l = 1:n_orders
             xi = S.segs == L.unique_segs(i) & S.orders == l;
             assert(sum(xi)==1);
             for k = 1:n_segs_per_scramstim(i) % loop through all segments
@@ -399,8 +395,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
         end
         
         if ~isempty(I.excludewin)
-            short_seg_in_win = false(n_segs_per_scramstim(i), n_orders_segspec(i));
-            for l = 1:n_orders_segspec(i)
+            short_seg_in_win = false(n_segs_per_scramstim(i), n_orders);
+            for l = 1:n_orders
                 seg_on = seg_start_time_in_scramstim{i}(:,l);
                 seg_off = seg_on + seg_dur;
                 xi = (seg_on > (I.excludewin(1)-1e-6) & seg_on < (I.excludewin(2)-1e-6)) ...
@@ -446,7 +442,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
             % and whether they are valid given boundary constraints
             if n_longer_seg_durs(i)>0
                 
-                embedded_seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders_segspec(i), n_longer_seg_durs(i));
+                embedded_seg_start_time_in_scramstim{i} = nan(n_segs_per_scramstim(i), n_orders, n_longer_seg_durs(i));
                 diffdur_valid_segs{i} = false(n_segs_per_scramstim(i), n_longer_seg_durs(i));
                 for j = 1:n_longer_seg_durs(i)
                     
@@ -537,7 +533,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             if diffdur_valid_segs{i}(k, j) && ~isempty(I.excludewin)
                                 
                                 % extract the segment responses for the longer segments
-                                for l = 1:n_orders_segspec(longer_seg_dur_inds{i}(j))
+                                for l = 1:n_orders
                                     
                                     % index of the longer segment int he scrambled stim
                                     xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
@@ -566,15 +562,11 @@ if ~exist(MAT_file, 'file') || I.overwrite
                             if diffdur_valid_segs{i}(k, j)
                                 
                                 % extract the segment responses for the longer segments
-                                for l = 1:n_orders_segspec(longer_seg_dur_inds{i}(j))
+                                for l = 1:n_orders
                                     
                                     % index of the longer segment int he scrambled stim
                                     xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
-                                    try
-                                        assert(sum(xi)==1);
-                                    catch
-                                        keyboard
-                                    end
+                                    assert(sum(xi)==1);
                                     longer_seg_index_in_scramstim = find(longer_seg_order_indices(which_longseg, sourcestim_index)==S.segorder(xi).order);
                                     assert(length(longer_seg_index_in_scramstim)==1);
                                     clear xi;
@@ -678,8 +670,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
             fprintf('Seg duration: %.0f\n', L.unique_segs(i)); drawnow;
             
             % non-embedded segments
-            Y_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders_segspec(i), n_reps);
-            for l = 1:n_orders_segspec(i)
+            Y_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_reps);
+            for l = 1:n_orders
                 xi = S.segs == L.unique_segs(i) & S.orders == l;
                 assert(sum(xi)==1);
                 X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);
@@ -703,7 +695,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
             if make_diffdur_comparisons
                 Y_embed_seg = nan(n_segs_per_scramstim(i), n_lags, n_orders, n_reps, n_longer_seg_durs(i));
                 for j = 1:n_longer_seg_durs(i)
-                    for l = 1:n_orders_segspec(longer_seg_dur_inds{i}(j))
+                    for l = 1:n_orders
                         xi = S.segs == L.unique_segs(longer_seg_dur_inds{i}(j)) & S.orders == l;
                         assert(sum(xi)==1);
                         X = squeeze_dims(D_noNaN(:,xi,chan,:),[2,3]);

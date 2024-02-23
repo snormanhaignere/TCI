@@ -363,8 +363,8 @@ if ~exist(MAT_file, 'file') || I.overwrite
                 
                 % create delays
                 % lag x segment duration x time delays
-                Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr));
-                
+                Y_model_with_delays = add_delays(Y_model, checkint(M.delay_sec_start*L.sr), 'preserve_singleton', true);
+
                 for j = 1:length(M.delay_sec_start)
                     
                     % multiply model prediction by same-context correlation
@@ -372,7 +372,7 @@ if ~exist(MAT_file, 'file') || I.overwrite
                     % lag/segdur x channel x smp x null-smp
                     X = Y_model_with_delays(:,:,j);
                     diff_context_pred = bsxfun(@times, same_context_format, X(:));
-                    
+
                     switch I.scalepred
                         case 'downpersegdur'
                             

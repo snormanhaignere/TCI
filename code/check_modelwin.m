@@ -1,9 +1,9 @@
 % Code that checks model window is correctly parametrized
 
 clc;
-intper = 0.2;
-delay = 0.2;
-shape = 1;
+intper = 0.4;
+delay = 0;
+shape = 3;
 
 sr = 1000;
 intervalmass = 0.75;

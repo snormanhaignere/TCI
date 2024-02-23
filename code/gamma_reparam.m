@@ -79,4 +79,3 @@ if I.cdf
 else
     h = gampdf((t_sec-c)/r, a, b);
 end
-
